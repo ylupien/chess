@@ -87,7 +87,8 @@
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
     import { Reflector } from 'three/addons/objects/Reflector.js';
-    Object.assign(window, { THREE, OrbitControls, RoomEnvironment, Reflector });
+    import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+    Object.assign(window, { THREE, OrbitControls, RoomEnvironment, Reflector, BufferGeometryUtils });
 
     // Les fichiers du jeu sont des scripts classiques (et non des modules) :
     // ainsi la page fonctionne aussi ouverte directement depuis le disque (file://).

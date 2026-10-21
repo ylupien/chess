@@ -173,7 +173,7 @@
   }
 
   // Surface de révolution lissée ; phi = 0 correspond à l'avant (+z).
-  function revolve(points, { segments = 48, phiStart = 0, phiLength = TAU, smooth = true } = {}) {
+  function revolve(points, { segments = 40, phiStart = 0, phiLength = TAU, smooth = true } = {}) {
     let pts = points.map(([r, y]) => new THREE.Vector2(r, y));
     if (smooth === 'even') {
       // Contour anguleux, re-découpé à pas constant pour que la texture ne s'étire pas
@@ -184,7 +184,7 @@
       }
       out.push(pts[pts.length - 1]);
       pts = out;
-    } else if (smooth) pts = new THREE.SplineCurve(pts).getPoints(points.length * 10).map(p => new THREE.Vector2(Math.max(0, p.x), p.y));
+    } else if (smooth) pts = new THREE.SplineCurve(pts).getPoints(points.length * 6).map(p => new THREE.Vector2(Math.max(0, p.x), p.y));
     const g = new THREE.LatheGeometry(pts, segments, phiStart, phiLength);
     g.computeVertexNormals();
     return g;
@@ -193,7 +193,7 @@
   function pedestal() {
     return mesh(revolve([
       [0, 0], [0.86, 0], [0.86, 0.1], [0.81, 0.16], [0.83, 0.22], [0.76, 0.28], [0.64, 0.3], [0, 0.3],
-    ], { segments: 72 }), 'body');
+    ], { segments: 56 }), 'body');
   }
 
   // Tête avec visage : yeux (blanc + pupille), sourcils, nez, oreilles, bouche, menton.

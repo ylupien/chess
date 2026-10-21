@@ -14,8 +14,8 @@ const foot = R => [
 
 function lathe(points) {
   const curve = new THREE.SplineCurve(points.map(([x, y]) => V(x, y)));
-  const pts = curve.getPoints(240).map(p => V(Math.max(0, p.x), p.y));
-  const g = new THREE.LatheGeometry(pts, 96);
+  const pts = curve.getPoints(120).map(p => V(Math.max(0, p.x), p.y));
+  const g = new THREE.LatheGeometry(pts, 64);
   g.computeVertexNormals();
   return g;
 }
@@ -87,8 +87,8 @@ function makeKnight() {
 
   const depth = 0.5;
   const geo = new THREE.ExtrudeGeometry(s, {
-    depth, curveSegments: 64, steps: 1, bevelEnabled: true,
-    bevelThickness: 0.14, bevelSize: 0.1, bevelSegments: 10,
+    depth, curveSegments: 40, steps: 1, bevelEnabled: true,
+    bevelThickness: 0.14, bevelSize: 0.1, bevelSegments: 6,
   });
   geo.translate(0, 0, -depth / 2);
 
@@ -274,13 +274,48 @@ const templateCache = {}; // « thème:type » → modèle (les pièces en sont 
 function registerTheme(id, theme) { THEMES[id] = theme; }
 function setPieceTheme(id) { if (THEMES[id]) currentTheme = id; return currentTheme; }
 
+// Fusionne toutes les parties d'un modèle qui partagent le même rôle de matériau
+// en un seul maillage. Un personnage médiéval passe ainsi d'environ 85 objets à
+// une quinzaine : c'est le nombre d'objets (appels de dessin), bien plus que le
+// nombre de triangles, qui coûte cher à la carte graphique.
+function mergeByRole(group) {
+  group.updateMatrixWorld(true);
+  const byRole = new Map();
+  group.traverse(o => {
+    if (!o.isMesh) return;
+    const g = o.geometry.clone();
+    // Mêmes attributs pour toutes les géométries, toutes indexées
+    for (const name of Object.keys(g.attributes)) {
+      if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+    }
+    if (!g.attributes.normal) g.computeVertexNormals();
+    if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    if (!g.index) g.setIndex([...Array(g.attributes.position.count).keys()]);
+    g.clearGroups();
+    g.applyMatrix4(o.matrixWorld);
+    const role = o.userData.role || 'body';
+    if (!byRole.has(role)) byRole.set(role, []);
+    byRole.get(role).push(g);
+  });
+  const out = new THREE.Group();
+  for (const [role, geos] of byRole) {
+    const merged = BufferGeometryUtils.mergeGeometries(geos, false);
+    geos.forEach(g => g.dispose());
+    const m = new THREE.Mesh(merged);
+    m.userData.role = role;
+    m.castShadow = m.receiveShadow = true;
+    out.add(m);
+  }
+  return out;
+}
+
 function getTemplate(type) {
   for (const id of [currentTheme, 'classic']) {
     const theme = THEMES[id];
     if (!theme.builders[type]) continue;
     const key = id + ':' + type;
     if (!(key in templateCache)) {
-      try { templateCache[key] = theme.builders[type](); }
+      try { templateCache[key] = mergeByRole(theme.builders[type]()); }
       catch (err) { console.error(`Thème ${id}, pièce ${type} :`, err); templateCache[key] = null; }
     }
     if (templateCache[key]) return { id, theme, tpl: templateCache[key] };
