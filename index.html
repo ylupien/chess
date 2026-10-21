@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Échiquier 3D</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="ui" class="panel">
+    <div class="panel-head" title="Glisser pour déplacer"><h1>♚ Échiquier 3D</h1><span class="grip">⠿</span></div>
+    <div class="seg">
+      <button id="mode-rules" class="active">Partie</button>
+      <button id="mode-free">Placement libre</button>
+    </div>
+    <div id="status"><span class="dot"></span><span id="status-text"></span></div>
+    <p class="hint" id="hint"></p>
+    <label class="theme-row">Pièces
+      <select id="theme-select"></select>
+    </label>
+    <label class="theme-row">Plateau
+      <select id="board-select"></select>
+    </label>
+    <div class="row">
+      <button id="btn-undo">↶ Annuler</button>
+      <button id="btn-view" disabled title="Sélectionnez une pièce pour la visualiser">🔍 Visualiser</button>
+      <button id="btn-reset">Nouvelle partie</button>
+      <button id="btn-turn" class="hidden">Changer le trait</button>
+      <button id="btn-clear" class="hidden">Vider le plateau</button>
+    </div>
+    <div class="row">
+      <button id="btn-white">Vue blancs</button>
+      <button id="btn-black">Vue noirs</button>
+      <button id="btn-top">Dessus</button>
+      <button id="btn-rotate">Rotation</button>
+    </div>
+    <p class="hint">Caméra : glisser dans le vide pour tourner · molette pour zoomer · clic droit pour déplacer</p>
+  </div>
+
+  <div id="log" class="panel">
+    <div class="panel-head" title="Glisser pour déplacer">
+      <h2>Déplacements</h2>
+      <button id="btn-copy" title="Copier la liste des coups">Copier</button>
+      <span class="grip">⠿</span>
+    </div>
+    <div id="log-body">
+      <table><tbody id="log-rows"></tbody></table>
+      <p id="log-empty">Aucun déplacement pour l'instant.</p>
+    </div>
+  </div>
+
+  <div id="viewer" class="hidden">
+    <div class="viewer-box">
+      <div class="viewer-head">
+        <div><h2 id="viewer-title"></h2><p id="viewer-sub"></p></div>
+        <button id="viewer-close" title="Fermer (Échap)">✕</button>
+      </div>
+      <div id="viewer-canvas"></div>
+      <div class="viewer-foot">
+        <p id="viewer-info"></p>
+        <div class="row">
+          <button id="viewer-rotate" class="active">Rotation</button>
+          <button id="viewer-color">Voir en noir</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="promo" class="hidden">
+    <div class="box">
+      <p>Promotion du pion</p>
+      <div id="promo-choices"></div>
+    </div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+    import { Reflector } from 'three/addons/objects/Reflector.js';
+    Object.assign(window, { THREE, OrbitControls, RoomEnvironment, Reflector });
+
+    // Les fichiers du jeu sont des scripts classiques (et non des modules) :
+    // ainsi la page fonctionne aussi ouverte directement depuis le disque (file://).
+    const FILES = ['scene', 'boards', 'pieces', 'medieval', 'rules', 'notation', 'panels', 'viewer', 'main'];
+    for (const name of FILES) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = `js/${name}.js`;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error(`Impossible de charger js/${name}.js`));
+        document.body.appendChild(s);
+      });
+    }
+  </script>
+</body>
+</html>
