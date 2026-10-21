@@ -135,6 +135,12 @@ async function playMove(m) {
   log.push({ kind: 'move', white: p.white, num: moveNumber, name, san: san + (check ? (canReply ? '+' : '#') : '') });
   if (!p.white) moveNumber++;
   if (!canReply) log.push({ kind: 'note', text: check ? `Échec et mat · ${p.white ? '1-0' : '0-1'}` : 'Pat · ½-½' });
+
+  // Sons joués quand la pièce touche le plateau (voir updateTweens)
+  p.landingSounds = [m.castle ? 'castle' : victim ? 'capture' : 'move'];
+  if (promoType) p.landingSounds.push('promote');
+  if (!canReply) p.landingSounds.push(check ? 'mate' : 'draw');
+  else if (check) p.landingSounds.push('check');
   clearSelection();
   layout(true);
   refresh();
@@ -158,6 +164,7 @@ function freeMove(p, dest) {
     lastMove = from >= 0 ? { from, to: dest } : { from: dest, to: dest };
   }
   p.moved = true;
+  p.landingSounds = [dest < 0 ? 'remove' : 'move'];
   epSquare = -1;
   clearSelection();
   layout(true);
@@ -188,7 +195,8 @@ function layout(animate) {
     if (!animate) { p.mesh.position.copy(to); continue; }
     const from = p.mesh.position.clone();
     const dist = from.distanceTo(to);
-    if (dist < 1e-4) continue;
+    if (dist < 1e-4) { playLandingSounds(p); continue; }
+    varyJelly(p);
     tweens.set(p.mesh, {
       piece: p, from, to, t0: performance.now(),
       dur: 260 + Math.min(380, dist * 70),
@@ -204,9 +212,19 @@ function updateTweens(now) {
     mesh.position.y += Math.sin(k * Math.PI) * t.lift;
     if (k >= 1) {
       tweens.delete(mesh);
-      t.piece.fx.sv -= 1.4; // petit écrasement à l'atterrissage
+      t.piece.fx.sv -= 1.4 * (t.piece.fx.v?.squash ?? 1); // petit écrasement à l'atterrissage
+      playLandingSounds(t.piece);
     }
   }
+}
+
+// Le premier son (impact) tout de suite, les suivants (échec, promotion…) juste après.
+function playLandingSounds(p) {
+  if (!p.landingSounds) return;
+  const [first, ...rest] = p.landingSounds;
+  p.landingSounds = null;
+  Sound.play(first);
+  rest.forEach((s, i) => setTimeout(() => Sound.play(s), 140 + i * 260));
 }
 
 // --- Effet « gelée » ---------------------------------------------------
@@ -218,6 +236,20 @@ const LEAN = 0.085, MAX_TILT = 0.38;
 const HELD_LIFT = 0.42;  // hauteur de la pièce tenue
 const COM_Y = 0.35;      // hauteur approximative du centre de gravité
 const clampTilt = a => Math.max(-MAX_TILT, Math.min(MAX_TILT, a));
+
+// Chaque mouvement reçoit une « personnalité » légèrement différente, pour que
+// le balancement ne soit jamais tout à fait le même d'une fois à l'autre.
+const around = (x, amt) => x * (1 + (Math.random() * 2 - 1) * amt);
+function varyJelly(p) {
+  p.fx.v = {
+    k: around(TILT_K, 0.25),           // raideur : oscillation plus ou moins rapide
+    c: around(TILT_C, 0.3),            // amortissement : oscille plus ou moins longtemps
+    lean: around(1, 0.3),              // amplitude de l'inclinaison
+    twist: (Math.random() * 2 - 1) * 0.35, // déviation de direction (radians, ~±20°)
+    squash: around(1, 0.35),           // intensité de l'écrasement / étirement
+  };
+}
+const JELLY_DEFAULT = { k: TILT_K, c: TILT_C, lean: 1, twist: 0, squash: 1 };
 
 const ZERO = new THREE.Vector3(), tmpV = new THREE.Vector3();
 function updateJelly(dt) {
@@ -237,10 +269,14 @@ function updateJelly(dt) {
     // Inclinaison cible : ce qui est sous le pivot traîne derrière le mouvement.
     // Posée (pivot à la base), le haut penche vers l'arrière ;
     // tenue par le haut, elle se balance comme un pendule.
-    const lean = LEAN * Math.max(-1, Math.min(1, (COM_Y - fx.pivot.y) / 0.25));
-    const gx = clampTilt(-vz * lean), gz = clampTilt(vx * lean);
-    fx.wx += (TILT_K * (gx - fx.tx) - TILT_C * fx.wx) * dt; fx.tx += fx.wx * dt;
-    fx.wz += (TILT_K * (gz - fx.tz) - TILT_C * fx.wz) * dt; fx.tz += fx.wz * dt;
+    const J = fx.v || JELLY_DEFAULT;
+    const lean = LEAN * J.lean * Math.max(-1, Math.min(1, (COM_Y - fx.pivot.y) / 0.25));
+    // Vitesse légèrement tournée (twist) : la pièce ne penche pas toujours pile à l'opposé
+    const cs = Math.cos(J.twist), sn = Math.sin(J.twist);
+    const ux = vx * cs - vz * sn, uz = vx * sn + vz * cs;
+    const gx = clampTilt(-uz * lean), gz = clampTilt(ux * lean);
+    fx.wx += (J.k * (gx - fx.tx) - J.c * fx.wx) * dt; fx.tx += fx.wx * dt;
+    fx.wz += (J.k * (gz - fx.tz) - J.c * fx.wz) * dt; fx.tz += fx.wz * dt;
 
     fx.sv += (SQUASH_K * (1 - fx.s) - SQUASH_C * fx.sv) * dt; fx.s += fx.sv * dt;
 
@@ -255,6 +291,13 @@ function updateJelly(dt) {
     tmpV.copy(fx.pivot).multiply(w.scale).applyEuler(w.rotation);
     w.position.copy(fx.pivot).sub(tmpV);
     w.position.y += fx.lift;
+
+    // Ne jamais traverser la table : le point le plus bas du bord du socle reste
+    // au-dessus du plateau (la pièce bascule alors sur le bord de son socle).
+    w.updateMatrix();
+    const e = w.matrix.elements; // colonnes : axe x = e[0..2], axe z = e[8..10] (rotation × échelle)
+    const lowest = w.position.y - (p.mesh.userData.baseRadius || 0.35) * Math.hypot(e[1], e[9]);
+    if (lowest < 0) w.position.y -= lowest;
   }
 }
 
@@ -321,7 +364,7 @@ function canPick(p) {
 }
 
 function select(p) {
-  if (selected !== p) p.fx.sv += 1.2; // léger étirement quand on la prend
+  if (selected !== p) { varyJelly(p); p.fx.sv += 1.2 * p.fx.v.squash; Sound.play('pick'); } // léger étirement quand on la prend
   selected = p;
   targets = mode === 'rules' ? legalMovesFrom(position(), p.sq, epSquare) : [];
   refreshHighlights();
@@ -341,7 +384,7 @@ function updateViewButton() {
   b.disabled = !selected;
   b.title = selected ? `Visualiser : ${pieceLabel(selected)}` : 'Sélectionnez une pièce pour la visualiser';
 }
-document.getElementById('btn-view').onclick = () => { if (selected) PieceViewer.open(selected); };
+document.getElementById('btn-view').onclick = () => { if (selected) { PieceViewer.open(selected); Sound.play('open'); } };
 
 // Tente de jouer la pièce sélectionnée vers la case s. Renvoie true si un coup est joué.
 function tryMoveTo(s, offBoard = false) {
@@ -442,6 +485,7 @@ window.addEventListener('pointermove', e => {
   if (!drag.active) {
     if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
     drag.active = true;
+    varyJelly(drag.piece);
     tweens.delete(drag.piece.mesh);
     renderer.domElement.style.cursor = 'grabbing';
   }
@@ -472,7 +516,7 @@ function endPointer(e, cancelled) {
   if (!cancelled && d.target) {
     moved = tryMoveTo(squareAt(d.target), isOffBoard(d.target));
   }
-  if (!moved) { layout(true); refreshHighlights(); } // retour à la case de départ
+  if (!moved) { layout(true); refreshHighlights(); Sound.play('cancel'); } // retour à la case de départ
 }
 window.addEventListener('pointerup', e => endPointer(e, false));
 window.addEventListener('pointercancel', e => endPointer(e, true));
@@ -561,8 +605,39 @@ function setMode(m) {
 
 btnRules.onclick = () => setMode('rules');
 btnFree.onclick = () => setMode('free');
-btnUndo.onclick = () => { if (history.length && !busy) restore(history.pop()); };
-document.getElementById('btn-reset').onclick = () => { if (!busy) newGame(); };
+btnUndo.onclick = () => { if (history.length && !busy) { restore(history.pop()); Sound.play('undo'); } };
+document.getElementById('btn-reset').onclick = () => { if (!busy) { newGame(); Sound.play('reset'); } };
+
+// Bouton son (activé / coupé, mémorisé)
+const btnSound = document.getElementById('btn-sound');
+function refreshSoundButton() {
+  btnSound.textContent = Sound.muted ? '🔇 Son' : '🔊 Son';
+  btnSound.classList.toggle('active', !Sound.muted);
+}
+btnSound.onclick = () => { Sound.setMuted(!Sound.muted); refreshSoundButton(); };
+refreshSoundButton();
+
+// Musique d'ambiance (lecture aléatoire, démarre au premier clic)
+const btnMusic = document.getElementById('btn-music');
+const btnNext = document.getElementById('btn-next');
+const nowPlaying = document.getElementById('now-playing');
+Music.onChange(({ enabled, playing, current }) => {
+  btnMusic.classList.toggle('active', enabled);
+  btnMusic.textContent = enabled ? '🎵 Musique' : '🔇 Musique';
+  btnNext.disabled = !enabled;
+  nowPlaying.textContent = enabled && playing && current ? `♪ ${current.title} — ${current.author}` : '';
+  nowPlaying.title = nowPlaying.textContent;
+});
+btnMusic.onclick = () => Music.setEnabled(!Music.enabled);
+btnNext.onclick = () => Music.next();
+
+// Volume de la musique (0 à 100 %)
+const musicVolume = document.getElementById('music-volume');
+const musicVolumeValue = document.getElementById('music-volume-value');
+musicVolume.value = Math.round(Music.volume * 100);
+const showVolume = () => { musicVolumeValue.textContent = `${musicVolume.value} %`; };
+showVolume();
+musicVolume.oninput = () => { Music.setVolume(musicVolume.value / 100); showVolume(); };
 btnTurn.onclick = () => {
   history.push(snapshot());
   turn = whiteToMove() ? 'b' : 'w';
@@ -667,7 +742,10 @@ function applyTheme(id) {
   try { localStorage.setItem('chess3d:theme', currentTheme); } catch { }
 }
 themeSelect.onchange = () => applyTheme(themeSelect.value);
-try { setPieceTheme(localStorage.getItem('chess3d:theme')); } catch { }
+// Par défaut : pièces médiévales (sauf choix mémorisé)
+let savedTheme = null;
+try { savedTheme = localStorage.getItem('chess3d:theme'); } catch { }
+setPieceTheme(savedTheme || 'medieval');
 fillThemeSelect();
 
 // --- Plateau -------------------------------------------------------------------
@@ -685,7 +763,7 @@ function applyBoard(id) {
 boardSelect.onchange = () => applyBoard(boardSelect.value);
 let savedBoard = null;
 try { savedBoard = localStorage.getItem('chess3d:board'); } catch { }
-applyBoard(savedBoard || 'wood');
+applyBoard(savedBoard || 'glass'); // par défaut : plateau Verre noir
 
 newGame();
 

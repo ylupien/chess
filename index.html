@@ -33,7 +33,17 @@
       <button id="btn-black">Vue noirs</button>
       <button id="btn-top">Dessus</button>
       <button id="btn-rotate">Rotation</button>
+      <button id="btn-sound" title="Activer ou couper le son">🔊 Son</button>
     </div>
+    <div class="row music-row">
+      <button id="btn-music" title="Activer ou couper la musique">🎵 Musique</button>
+      <button id="btn-next" title="Morceau suivant (au hasard)">⏭</button>
+      <label class="volume" title="Volume de la musique">
+        <input type="range" id="music-volume" min="0" max="100" step="1" aria-label="Volume de la musique" />
+        <span id="music-volume-value"></span>
+      </label>
+    </div>
+    <p id="now-playing" class="now-playing"></p>
     <p class="hint">Caméra : glisser dans le vide pour tourner · molette pour zoomer · clic droit pour déplacer</p>
   </div>
 
@@ -92,7 +102,7 @@
 
     // Les fichiers du jeu sont des scripts classiques (et non des modules) :
     // ainsi la page fonctionne aussi ouverte directement depuis le disque (file://).
-    const FILES = ['scene', 'boards', 'pieces', 'medieval', 'rules', 'notation', 'panels', 'viewer', 'main'];
+    const FILES = ['scene', 'boards', 'pieces', 'medieval', 'rules', 'notation', 'panels', 'sound', 'music', 'viewer', 'main'];
     for (const name of FILES) {
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');

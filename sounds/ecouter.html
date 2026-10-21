@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sons et musiques</title>
+  <style>
+    :root { --bg: #1b1d22; --panel: #23252b; --text: #e9e6df; --muted: #9a978f; --accent: #c9a25e; }
+    body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--text);
+      font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    h2 { font-size: 19px; margin: 32px 0 6px; }
+    p.lead { color: var(--muted); margin: 0 0 18px; }
+    section { background: var(--panel); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+    h3 { font-size: 15px; margin: 0 0 2px; }
+    .desc { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+    .desc a { color: var(--accent); }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    button { background: transparent; color: var(--text); border: 1px solid rgba(255,255,255,.25);
+      border-radius: 6px; padding: 7px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    button.playing { background: var(--accent); border-color: var(--accent); color: #1b1d22; }
+    code { font-size: 12px; color: var(--muted); }
+    .track { display: grid; grid-template-columns: 1fr minmax(220px, 320px); gap: 12px; align-items: center; padding: 8px 0;
+      border-top: 1px solid rgba(255,255,255,.06); }
+    .track:first-of-type { border-top: 0; }
+    .track audio { width: 100%; }
+    .track .t { font-weight: 600; }
+    @media (max-width: 640px) { .track { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Sons et musiques du jeu</h1>
+  <p class="lead">Tous ces fichiers sont sous licence CC0 (libres de droits, y compris en usage commercial).
+    Les sources et auteurs sont indiqués pour chaque fichier.</p>
+
+  <h2>Sons de pièces</h2>
+  <p class="lead">Vrais enregistrements de pièces d'échecs (Freesound), découpés en coups individuels.
+    Le jeu en tire un au hasard à chaque pose.</p>
+  <div id="hits"></div>
+
+  <h2>Musiques d'ambiance</h2>
+  <div id="music"></div>
+</main>
+<script>
+  // Sons de pièces retenus : [fichier, source]
+  const HITS = [
+    ...['733927-2', '733927-3', '733927-4', '733927-5', '733927-6'].map(n => [`jjtaynos-${n}`, 'https://freesound.org/people/JJTaynos/sounds/733927/']),
+    ...['733932-1', '733932-2', '733932-3', '733932-4', '733932-5', '733932-6'].map(n => [`jjtaynos-${n}`, 'https://freesound.org/people/JJTaynos/sounds/733932/']),
+  ];
+
+  // Musiques : [fichier, titre, auteur, page source, groupe]
+  const MUSIC = [
+    ['fantasy-randommind-lament-for-a-warriors-soul', 'Lament for a Warrior\'s Soul', 'RandomMind', 'https://opengameart.org/content/fantasy-lament-for-a-warriors-soul', 'Fantasy médiéval (calme, harpe, flûte, cordes)'],
+    ['fantasy-ecrivain-meadow-thoughts', 'Meadow Thoughts', 'Écrivain', 'https://opengameart.org/content/meadow-thoughts', 'Fantasy médiéval (calme, harpe, flûte, cordes)'],
+    ['fantasy-tarush-singhal-lush-mossy-grotto', 'Lush Mossy Grotto', 'Tarush Singhal', 'https://opengameart.org/content/lush-mossy-grotto', 'Fantasy médiéval (calme, harpe, flûte, cordes)'],
+    ['fantasy-yoiyami-sunset-plains', 'Sunset Plains', 'Yoiyami', 'https://opengameart.org/content/sunset-plains', 'Fantasy médiéval (calme, harpe, flûte, cordes)'],
+    ['fantasy-cynicmusic-a-new-town-harp', 'A New Town (harpe)', 'cynicmusic', 'https://opengameart.org/content/a-new-town-rpg-theme', 'Fantasy médiéval (calme, harpe, flûte, cordes)'],
+    ['fantasy-bobjt-memories-of-am-town', 'Memories of Am Town', 'bobjt', 'https://opengameart.org/content/memories-of-am-town', 'Fantasy médiéval (calme, harpe, flûte, cordes)'],
+    ['fantasy-bobjt-to-the-wind', 'To the Wind', 'bobjt', 'https://opengameart.org/content/to-the-wind', 'Fantasy médiéval (calme, harpe, flûte, cordes)'],
+    ['fantasy-stereoscopic-celtic-loop', 'Celtic Loop', 'Stereoscopic', 'https://opengameart.org/content/celtic-loop', 'Fantasy médiéval (calme, harpe, flûte, cordes)'],
+    ['medieval-randommind-the-bards-tale', 'The Bard\'s Tale', 'RandomMind', 'https://opengameart.org/content/medieval-the-bards-tale', 'Médiéval de taverne (plus entraînant)'],
+    ['medieval-randommind-minstrel-dance', 'Minstrel Dance', 'RandomMind', 'https://opengameart.org/content/medieval-minstrel-dance', 'Médiéval de taverne (plus entraînant)'],
+    ['medieval-randommind-kings-feast', 'King\'s Feast', 'RandomMind', 'https://opengameart.org/content/medieval-kings-feast', 'Médiéval de taverne (plus entraînant)'],
+    ['medieval-randommind-the-old-tower-inn', 'The Old Tower Inn', 'RandomMind', 'https://opengameart.org/content/medieval-the-old-tower-inn', 'Médiéval de taverne (plus entraînant)'],
+    ['calme-cynicmusic-another-august', 'Another August ★', 'cynicmusic', 'https://opengameart.org/content/another-august', 'Calme, façon Minecraft (★ = vos favoris)'],
+    ['calme-umplix-infinite-world', 'Infinite World ★', 'Umplix', 'https://opengameart.org/content/infinite-world', 'Calme, façon Minecraft (★ = vos favoris)'],
+    ['calme-umplix-into-the-caves', 'Into the Caves', 'Umplix', 'https://opengameart.org/content/into-the-caves', 'Calme, façon Minecraft (★ = vos favoris)'],
+    ['calme-cynicmusic-november-snow', 'November Snow', 'cynicmusic', 'https://opengameart.org/content/november-snow', 'Calme, façon Minecraft (★ = vos favoris)'],
+    ['calme-cynicmusic-calm-piano-vaporware', 'Calm Piano 1 (Vaporware)', 'cynicmusic', 'https://opengameart.org/content/calm-piano-1-vaporware', 'Calme, façon Minecraft (★ = vos favoris)'],
+    ['calme-cynicmusic-lifewave', 'Calm Ambient 3 (Lifewave)', 'cynicmusic', 'https://opengameart.org/content/calm-ambient-3-lifewave-2k', 'Calme, façon Minecraft (★ = vos favoris)'],
+    ['calme-cynicmusic-calm-relax-synthwave', 'Calm Relax 1 (Synthwave)', 'cynicmusic', 'https://opengameart.org/content/calm-relax-1-synthwave-421k', 'Calme, façon Minecraft (★ = vos favoris)'],
+    ['calme-cynicmusic-happy-lullaby', 'Happy Lullaby', 'cynicmusic', 'https://opengameart.org/content/happy-lullaby-song17', 'Calme, façon Minecraft (★ = vos favoris)'],
+  ];
+
+  // Un seul son à la fois
+  let current = null;
+  function play(src, btn) {
+    if (current) { current.audio.pause(); current.btn?.classList.remove('playing'); }
+    const audio = new Audio(src);
+    current = { audio, btn };
+    btn?.classList.add('playing');
+    audio.onended = () => btn?.classList.remove('playing');
+    audio.play();
+  }
+
+  const hitsRoot = document.getElementById('hits');
+  const sec = document.createElement('section');
+  sec.innerHTML = `<h3>JJTaynos · Chess Pieces Move</h3><p class="desc">Pièces d'échecs posées sur un échiquier (micro proche et éloigné). ·
+    <a href="https://freesound.org/people/JJTaynos/sounds/733927/" target="_blank" rel="noopener">source 1</a> ·
+    <a href="https://freesound.org/people/JJTaynos/sounds/733932/" target="_blank" rel="noopener">source 2</a></p><div class="row"></div>`;
+  for (const [file] of HITS) {
+    const b = document.createElement('button');
+    b.innerHTML = `▶ <code>${file}.mp3</code>`;
+    b.onclick = () => play(`pieces/${file}.mp3`, b);
+    sec.querySelector('.row').appendChild(b);
+  }
+  hitsRoot.appendChild(sec);
+
+  // Les lecteurs <audio> se mettent en pause entre eux
+  document.addEventListener('play', e => {
+    for (const a of document.querySelectorAll('audio')) if (a !== e.target) a.pause();
+    if (current && e.target !== current.audio) { current.audio.pause(); current.btn?.classList.remove('playing'); }
+  }, true);
+
+  const musicRoot = document.getElementById('music');
+  const groups = new Map();
+  for (const m of MUSIC) { if (!groups.has(m[4])) groups.set(m[4], []); groups.get(m[4]).push(m); }
+  for (const [group, tracks] of groups) {
+    const sec = document.createElement('section');
+    sec.innerHTML = `<h3>${group}</h3>`;
+    for (const [file, title, author, url] of tracks) {
+      const div = document.createElement('div');
+      div.className = 'track';
+      div.innerHTML = `<div><div class="t">${title}</div><div class="desc">${author} · <a href="${url}" target="_blank" rel="noopener">source</a> · <code>${file}.mp3</code></div></div>
+        <audio controls preload="none" src="musique/${file}.mp3"></audio>`;
+      sec.appendChild(div);
+    }
+    musicRoot.appendChild(sec);
+  }
+</script>
+</body>
+</html>

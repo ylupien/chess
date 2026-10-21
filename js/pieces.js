@@ -328,16 +328,21 @@ function getTemplate(type) {
 //   model  → le modèle 3D lui-même
 function buildMesh(type, white) {
   const wobble = new THREE.Group();
-  wobble.add(buildModel(type, white));
+  const model = buildModel(type, white);
+  wobble.add(model);
   const root = new THREE.Group();
   root.add(wobble);
   root.userData.wobble = wobble;
+  root.userData.baseRadius = model.userData.baseRadius; // rayon du socle (pour ne pas traverser la table)
   return root;
 }
 
 function buildModel(type, white) {
   const { id, theme, tpl } = getTemplate(type);
   const m = tpl.clone();
+  // Rayon du socle, en unités du plateau : pieds classiques (voir foot()) ou socle médiéval
+  const footR = id === 'classic' ? { p: 0.82, n: 0.95, b: 0.92, r: 0.95, q: 1, k: 1 }[type] : 0.86;
+  m.userData.baseRadius = footR * PIECE_SCALE;
   const mats = theme.materials(white);
   m.traverse(o => { if (o.isMesh) o.material = mats[o.userData.role] || mats.body; });
   m.scale.setScalar(PIECE_SCALE);

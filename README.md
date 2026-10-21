@@ -25,6 +25,20 @@ Une connexion Internet est requise au premier chargement : Three.js (v0.160.0) e
 - **↶ Annuler** revient en arrière, coup par coup (dans les deux modes).
 - **🔍 Visualiser** (actif quand une pièce est sélectionnée) ouvre une fenêtre pour admirer la pièce sous tous les angles, avec sa règle de déplacement.
 
+### Son
+
+- **Pièces** : vrais enregistrements de pièces d'échecs posées sur un échiquier (JJTaynos, Freesound, CC0), dans `sounds/pieces/`. Un coup est tiré au hasard à chaque pose, avec une légère variation de hauteur. La capture, le roque et la nouvelle partie combinent plusieurs coups.
+- **Autres sons** (synthétisés en direct, Web Audio) : prise en main, échec, promotion, mat, pat, coup refusé, annulation, boutons et listes déroulantes.
+
+Le bouton **🔊 Son** coupe ou rétablit le son (choix mémorisé).
+
+### Musique d'ambiance
+
+20 morceaux libres de droits (CC0) dans `sounds/musique/` : fantasy médiéval, médiéval de taverne et ambiances calmes.
+La musique démarre au premier clic, toujours par « Calm Piano » (cynicmusic), puis choisit les morceaux au hasard (jamais deux fois de suite le même), monte en douceur jusqu'au volume choisi en 10 secondes puis enchaîne sur un autre morceau.
+**🎵 Musique** l'active ou la coupe, **⏭** passe au morceau suivant et le curseur règle le volume (0 à 100 %, 10 % par défaut). Ces choix sont mémorisés.
+Les sources et auteurs sont listés dans `sounds/ecouter.html`, qui permet aussi d'écouter chaque morceau.
+
 ### Journal des déplacements
 
 Le panneau de droite liste chaque coup en notation algébrique avec figurines (♘f3, exd5, O-O, e8=♕, +, #).
@@ -34,8 +48,8 @@ Sous chaque coup, une ligne indique la pièce jouée et son trajet (« Cavalier 
 
 | Sélecteur | Choix |
 |---|---|
-| **Pièces** | *Classique* (style Staunton en buis et ébène) · *Médiéval* (personnages : fantassin, tour de guet avec arbalétrier, chevalier à cheval, évêque, reine, roi) |
-| **Plateau** | *Bois clair* · *Verre noir* (verre fumé noir et opalin, vrais reflets des pièces, filets dorés, cadre laqué) |
+| **Pièces** | *Médiéval* (par défaut ; personnages : fantassin, tour de guet avec arbalétrier, chevalier à cheval, évêque, reine, roi) · *Classique* (style Staunton en buis et ébène) |
+| **Plateau** | *Verre noir* (par défaut ; verre fumé noir et opalin, vrais reflets des pièces, filets dorés, cadre laqué) · *Bois clair* |
 
 Les choix de thème et la position des panneaux sont mémorisés dans le navigateur.
 
@@ -57,6 +71,9 @@ js/medieval.js    thème Médiéval (les six personnages)
 js/rules.js       moteur de règles (indépendant de la 3D)
 js/notation.js    notation des coups et noms des pièces
 js/panels.js      panneaux déplaçables
+js/sound.js       sons du jeu (coups enregistrés + sons synthétisés)
+js/music.js       musique d'ambiance aléatoire avec montée du volume
+sounds/           coups de pièces et musiques (CC0), page d'écoute ecouter.html
 js/viewer.js      visualiseur de pièce
 js/main.js        état du jeu, animations, interactions, interface, journal
 ```

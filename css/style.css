@@ -75,3 +75,10 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
 #viewer-canvas canvas { width: 100%; height: 100%; cursor: grab; }
 .viewer-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 16px 14px; flex-wrap: wrap; }
 #viewer-info { margin: 0; font-size: 13px; line-height: 1.45; opacity: .8; flex: 1 1 300px; }
+
+/* Musique */
+.music-row { align-items: center; flex-wrap: nowrap; }
+.now-playing { margin: -4px 0 0; font-size: 12px; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 1.2em; }
+.volume { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; font-size: 12px; }
+.volume input { flex: 1; min-width: 60px; accent-color: var(--accent); cursor: pointer; }
+.volume span { width: 3.2em; text-align: right; opacity: .75; font-variant-numeric: tabular-nums; }
