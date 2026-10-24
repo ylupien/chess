@@ -1,5 +1,8 @@
 .DS_Store
-Thumbs.db
-.vscode/
 .idea/
+.vscode/
+Thumbs.db
 node_modules/
+
+# Identifiants du tunnel Cloudflare (générés par scripts/web.sh)
+deploy/cloudflared/

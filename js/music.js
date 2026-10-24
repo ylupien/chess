@@ -32,8 +32,9 @@ const Music = (() => {
   const FADE_MS = 10000; // montée de 0 au volume choisi en 10 secondes
 
   let audio = null, current = null, lastIndex = -1, fadeTimer = null;
+  let firstPlayed = false; // « Calm Piano » tant qu'aucun morceau n'a réellement démarré
   let enabled = true, playing = false;
-  let level = 0.1; // volume choisi par l'utilisateur (0 à 1), 10 % par défaut
+  let level = 0.06; // volume choisi par l'utilisateur (0 à 1), 6 % par défaut
   let fade = 0;    // progression de la montée (0 à 1) ; volume réel = fade × level
   const listeners = new Set();
   try { enabled = localStorage.getItem('chess3d:music') !== '0'; } catch { }
@@ -47,7 +48,8 @@ const Music = (() => {
   // Le premier morceau est toujours « Calm Piano » ; ensuite tirage au sort,
   // jamais deux fois de suite le même morceau.
   function pick() {
-    let i = lastIndex === -1 ? TRACKS.findIndex(t => t.src.includes(FIRST_TRACK)) : -1;
+    // Si le navigateur a refusé une première tentative de lecture, on retente « Calm Piano ».
+    let i = firstPlayed ? -1 : TRACKS.findIndex(t => t.src.includes(FIRST_TRACK));
     if (i === -1) {
       do { i = Math.floor(Math.random() * TRACKS.length); } while (TRACKS.length > 1 && i === lastIndex);
     }
@@ -77,7 +79,9 @@ const Music = (() => {
     a.volume = 0;
     a.onended = () => { if (playing && audio === a) playNext(); };
     a.onerror = () => { if (playing && audio === a) setTimeout(playNext, 1000); }; // fichier illisible : on passe au suivant
-    a.play().then(() => fadeIn(a)).catch(() => { playing = false; notify(); }); // lecture refusée (pas encore d'action de l'utilisateur)
+    a.play()
+      .then(() => { firstPlayed = true; fadeIn(a); })
+      .catch(() => { if (audio === a) { playing = false; notify(); } }); // lecture refusée (pas encore d'action de l'utilisateur)
     playing = true;
     notify();
   }
@@ -109,11 +113,19 @@ const Music = (() => {
 
   // Les navigateurs n'autorisent la lecture qu'après une action de l'utilisateur :
   // la musique démarre au premier clic ou à la première touche.
-  for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, start, { capture: true, passive: true });
+  // (sauf sur le bouton Musique lui-même, qui gère son propre clic : sinon ce premier clic
+  //  lancerait la musique puis la couperait aussitôt)
+  const onGesture = e => { if (!e.target.closest?.('#btn-music')) start(); };
+  for (const ev of ['pointerdown', 'pointerup', 'click', 'keydown', 'touchend']) window.addEventListener(ev, onGesture, { capture: true, passive: true });
+
+  // Activée par défaut : on tente de démarrer tout de suite. Si le navigateur bloque la
+  // lecture automatique, elle démarrera au premier clic (toujours par « Calm Piano »).
+  start();
 
   return {
     start, stop, setEnabled, setVolume,
     get volume() { return level; },
+    get playing() { return playing; },
     next: () => { if (enabled) playNext(); },
     onChange: fn => { listeners.add(fn); fn({ enabled, playing, current }); },
     get enabled() { return enabled; },

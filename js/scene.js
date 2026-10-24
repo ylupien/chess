@@ -10,6 +10,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
+renderer.info.autoReset = false; // remis à zéro une fois par image dans main.js
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1b1d22);
@@ -27,15 +28,32 @@ controls.maxDistance = 25;
 controls.maxPolarAngle = Math.PI / 2 - 0.05; // ne pas passer sous le sol
 controls.autoRotateSpeed = 1.0;
 
+// Vue de départ (copiée depuis le panneau Debug, « Copier la caméra ») :
+// distance 9, inclinaison 69°, point visé un peu sous le plateau → caméra plus basse.
+const START_VIEW = { position: [-0.236, 2.83, 8.701], target: [0.131, -0.396, 0.307], fov: 40 };
+const DEFAULT_ZOOM = 9;
+
+function applyCameraState({ position, target, fov }) {
+  camera.position.set(...position);
+  controls.target.set(...target);
+  if (fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  controls.update();
+}
+// Même vue vue depuis l'autre camp : demi-tour autour de l'axe vertical (x → −x, z → −z)
+const flip = ([x, y, z]) => [-x, y, -z];
 const VIEWS = {
-  white: [0, 9, 10.5],
-  black: [0, 9, -10.5],
-  top:   [0, 15, 0.01],
+  white: () => START_VIEW,
+  black: () => ({ position: flip(START_VIEW.position), target: flip(START_VIEW.target), fov: START_VIEW.fov }),
+  top: () => ({ position: [0, START_VIEW.target[1] + DEFAULT_ZOOM, 0.01], target: [0, START_VIEW.target[1], 0], fov: START_VIEW.fov }),
 };
 function setView(name) {
-  camera.position.set(...VIEWS[name]);
-  controls.target.set(0, 0.4, 0);
-  controls.update();
+  // « white_fly », « black_fly » : la caméra rejoint la vue en douceur (nouvelle partie)
+  if (name.endsWith('_fly') && typeof CameraFly !== 'undefined') {
+    const v = VIEWS[name.slice(0, -4)]();
+    CameraFly.to(v.position, v.target);
+    return;
+  }
+  applyCameraState(VIEWS[name] ? VIEWS[name]() : START_VIEW);
 }
 setView('white');
 

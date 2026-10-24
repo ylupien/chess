@@ -18,7 +18,11 @@ let captureCounter = 0;
 let moveNumber = 1;                    // numéro du coup complet (avance après les Noirs)
 let log = [];                          // { kind: 'move', white, san, num } | { kind: 'note', text, free }
 let gameOver = false;
-let busy = false;                      // dialogue de promotion ouvert
+let busy = false;
+let resetting = false;      // remise en place animée des pièces en cours
+let resetGen = 0;          // numéro de remise en place (une nouvelle partie interrompt la précédente)
+let forcedResult = null;    // fin de partie simulée (panneau Debug) : { winner: 'w'|'b'|null, reason }
+let gameStartTime = 0;      // horodatage du premier coup (durée affichée en fin de partie)                      // dialogue de promotion ouvert
 
 let selected = null;
 let targets = [];                      // coups légaux de la pièce sélectionnée (mode partie)
@@ -43,6 +47,8 @@ function setMesh(p) {
 }
 
 function newGame() {
+  resetGen++; resetting = false; // annule une remise en place animée en cours
+  Clock.reset();
   piecesGroup.clear();
   tweens.clear();
   pieces = [];
@@ -67,6 +73,124 @@ function newGame() {
   refresh();
 }
 
+// Cases de départ, dans le même ordre que la création des pièces par newGame()
+function startSlots() {
+  const BACK = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'], slots = [];
+  for (let f = 0; f < 8; f++) {
+    slots.push([BACK[f], true, SQ(f, 0)], ['p', true, SQ(f, 1)], ['p', false, SQ(f, 6)], [BACK[f], false, SQ(f, 7)]);
+  }
+  return slots;
+}
+
+// Nouvelle partie « comme en vrai » : chaque pièce est ramenée à sa case en volant,
+// deux à la fois au maximum, les plus éloignées d'abord ; la caméra revient à la vue de départ.
+// fromOnline : remise en place décidée par la partie en ligne (les deux joueurs ont accepté)
+function resetGame({ fromOnline = false } = {}) {
+  if (resetting || busy) return;
+  // En ligne : on ne se déconnecte pas, on propose la nouvelle partie au second joueur
+  if (Online.active && !fromOnline) { Online.requestNewGame(); return; }
+  if (pieces.length !== 32) { newGame(); return; }
+  resetting = true;
+  forcedResult = null;
+  EndGame.hide();
+  Clock.reset();
+  clearSelection();
+  // Où se trouve physiquement chaque pièce avant la remise en place (-1 = réserve)
+  const physSq = new Map(pieces.map(p => [p, p.sq]));
+  board.fill(null);
+  startSlots().forEach(([type, white, sq], i) => {
+    const p = pieces[i];
+    if (p.type !== type) { p.type = type; setMesh(p); } // une pièce promue redevient pion
+    p.sq = sq; p.moved = false; p.capturedAt = 0;
+    board[sq] = p;
+  });
+  turn = 'w'; epSquare = -1; lastMove = null; history = []; captureCounter = 0;
+  moveNumber = 1; log = []; gameStartTime = 0;
+  setView(Online.active && !Online.isWhite ? 'black_fly' : 'white_fly'); // chacun revient à son côté
+
+  // Occupation réelle des cases pendant la remise en place : une pièce ne se pose sur sa case
+  // que si elle est libre ; sinon, la pièce qui l'occupe doit d'abord partir vers la sienne.
+  // Une case se libère dès que sa pièce est soulevée, et elle est réservée dès qu'une pièce
+  // part pour s'y poser.
+  const occ = new Array(64).fill(null);
+  for (const p of pieces) { const s = physSq.get(p); if (s >= 0) occ[s] = p; }
+  const pending = new Set(pieces.filter(p => physSq.get(p) !== p.sq || p.mesh.position.distanceTo(homePosition(p)) > 0.01));
+  const inFlight = new Set();
+  const homeFree = p => occ[p.sq] === null || occ[p.sq] === p;
+  const distHome = p => p.mesh.position.distanceTo(homePosition(p));
+
+  const fly = (p, to, done) => {
+    const from = p.mesh.position.clone(), dist = from.distanceTo(to);
+    const src = physSq.get(p);
+    if (src >= 0 && occ[src] === p) occ[src] = null; // soulevée : sa case se libère
+    inFlight.add(p);
+    varyJelly(p);
+    p.landingSounds = ['move'];
+    tweens.set(p.mesh, {
+      piece: p, from, to: to.clone(), t0: performance.now(),
+      dur: 650 + Math.min(900, dist * 110),
+      lift: Math.min(1.1, 0.45 + dist * 0.07),
+      onDone: () => { inFlight.delete(p); done(); },
+    });
+  };
+  const flyHome = (p, next) => {
+    fly(p, homePosition(p), () => { pending.delete(p); next(); }); // libère d'abord sa case de départ…
+    occ[p.sq] = p;                                                  // …puis réserve sa case d'arrivée
+    physSq.set(p, p.sq);
+  };
+  // Seul cas particulier : deux pièces sur la case l'une de l'autre (échange circulaire).
+  // Une main soulève l'une d'elles et la tient au-dessus de sa case, le temps de poser l'autre.
+  const liftInHand = (p, next) => {
+    fly(p, p.mesh.position.clone().add(new THREE.Vector3(0, 1.0, 0)), next);
+    physSq.set(p, -2); // tenue en l'air : elle n'occupe plus aucune case
+  };
+  // Une pièce qui occupe la case d'origine d'une pièce en attente doit partir en priorité
+  const isBlocking = p => { const s = physSq.get(p); return s >= 0 && [...pending].some(q => q !== p && q.sq === s); };
+
+  // Deux joueurs à deux mains : chaque main ne replace que les pièces de sa couleur, avec ses
+  // propres pauses aléatoires. Au plus 2 pièces blanches et 2 pièces noires en vol à la fois,
+  // jamais synchronisées. Si une pièce adverse occupe ma case, l'adversaire la déplace en priorité.
+  const HANDS = 4, gen = ++resetGen; // gen : interrompue si une nouvelle partie démarre entre-temps
+  const finish = () => { resetting = false; refresh(); };
+  let idleHands = 0;
+  const pause = () => 120 + Math.random() * 650;
+  const mine = white => [...pending].filter(p => p.white === white);
+  const hand = (white, delay) => setTimeout(() => {
+    if (gen !== resetGen) return;
+    const own = mine(white);
+    if (!own.length) { if (++idleHands === HANDS) finish(); return; }
+    const ready = own.filter(p => !inFlight.has(p) && homeFree(p));
+    if (ready.length) {
+      // d'abord les pièces qui bloquent la case d'une autre, puis les plus éloignées
+      ready.sort((a, b) => (isBlocking(b) - isBlocking(a)) || (distHome(b) - distHome(a)));
+      return flyHome(ready[0], () => hand(white, pause()));
+    }
+    if (inFlight.size) return hand(white, 150);       // une case va se libérer : on attend
+    const blocker = own.find(p => physSq.get(p) >= 0); // échange circulaire : on soulève une de ses pièces
+    if (blocker) return liftInHand(blocker, () => hand(white, pause()));
+    hand(white, 150);                                  // l'adversaire doit d'abord libérer la case
+  }, delay);
+
+  refresh();
+  if (!pending.size) { finish(); return; }
+  hand(true, Math.random() * 300);         // main droite des Blancs
+  hand(true, 300 + Math.random() * 500);   // main gauche des Blancs
+  hand(false, 100 + Math.random() * 400);  // main droite des Noirs
+  hand(false, 450 + Math.random() * 550);  // main gauche des Noirs
+}
+
+// Fin de partie simulée (panneau Debug)
+// En ligne, la simulation passe par le serveur pour s'appliquer aux deux joueurs à la fois.
+function simulateEnd(winner, reason, { fromOnline = false } = {}) {
+  if (Online.active && !fromOnline) { Online.sendSimulate(winner, reason); return; }
+  if (resetting) return;
+  if (mode !== 'rules') setMode('rules');
+  forcedResult = { winner, reason };
+  Clock.stop();
+  Sound.play(winner ? 'mate' : 'draw');
+  refresh();
+}
+
 // --- Historique (annuler) --------------------------------------------
 function snapshot() {
   return {
@@ -83,6 +207,8 @@ function restore(s) {
     if (p.sq >= 0) board[p.sq] = p;
   });
   ({ turn, epSquare, lastMove, moveNumber } = s);
+  forcedResult = null;
+  Clock.syncTurn(turn === 'w');
   log.length = s.logLength;
   clearSelection();
   layout(true);
@@ -96,13 +222,16 @@ function sendToReserve(p) {
 }
 
 // --- Jouer un coup (mode partie) --------------------------------------
-async function playMove(m) {
+// remote : coup reçu de l'adversaire en ligne (promo : pièce de promotion choisie par lui)
+async function playMove(m, { remote = false, promo = null } = {}) {
   const p = board[m.from];
   let promoType = null;
   if (m.promo) {
-    promoType = await askPromotion(p.white);
+    promoType = remote && promo ? promo : await askPromotion(p.white);
   }
+  if (!remote) Online.sendMove(m.from, m.to, promoType); // transmis à l'adversaire en ligne
   history.push(snapshot());
+  if (history.length === 1) gameStartTime = performance.now();
   const san = sanFor(position(), m, epSquare, promoType); // calculée avant de modifier la position
 
   const victim = m.ep ? board[SQ(fileOf(m.to), rankOf(m.from))] : board[m.to];
@@ -135,6 +264,8 @@ async function playMove(m) {
   log.push({ kind: 'move', white: p.white, num: moveNumber, name, san: san + (check ? (canReply ? '+' : '#') : '') });
   if (!p.white) moveNumber++;
   if (!canReply) log.push({ kind: 'note', text: check ? `Échec et mat · ${p.white ? '1-0' : '0-1'}` : 'Pat · ½-½' });
+  Clock.onMove(p.white);
+  if (!canReply) Clock.stop();
 
   // Sons joués quand la pièce touche le plateau (voir updateTweens)
   p.landingSounds = [m.castle ? 'castle' : victim ? 'capture' : 'move'];
@@ -148,12 +279,16 @@ async function playMove(m) {
 
 // --- Déplacer librement (mode libre) ----------------------------------
 // dest = case vide, ou -1 pour mettre la pièce dans la réserve.
+// Si la case d'arrivée est occupée, la pièce qui s'y trouve sort du jeu (vers la réserve).
 function freeMove(p, dest) {
-  if (dest >= 0 && board[dest]) return;
+  if (dest >= 0 && board[dest] === p) return;
   history.push(snapshot());
   const from = p.sq;
+  const victim = dest >= 0 ? board[dest] : null;
   const where = sq => sq >= 0 ? sqName(sq) : 'réserve';
-  log.push({ kind: 'note', free: true, text: `${pieceGlyph(p)} ${pieceLabel(p)} ${where(from)} → ${where(dest)}` });
+  log.push({ kind: 'note', free: true,
+    text: `${pieceGlyph(p)} ${pieceLabel(p)} ${where(from)} → ${where(dest)}` + (victim ? ` × ${pieceLabel(victim)}` : '') });
+  if (victim) sendToReserve(victim);
   if (dest < 0) {
     sendToReserve(p);
     lastMove = null;
@@ -164,7 +299,7 @@ function freeMove(p, dest) {
     lastMove = from >= 0 ? { from, to: dest } : { from: dest, to: dest };
   }
   p.moved = true;
-  p.landingSounds = [dest < 0 ? 'remove' : 'move'];
+  p.landingSounds = [dest < 0 ? 'remove' : victim ? 'capture' : 'move'];
   epSquare = -1;
   clearSelection();
   layout(true);
@@ -214,6 +349,7 @@ function updateTweens(now) {
       tweens.delete(mesh);
       t.piece.fx.sv -= 1.4 * (t.piece.fx.v?.squash ?? 1); // petit écrasement à l'atterrissage
       playLandingSounds(t.piece);
+      t.onDone?.();
     }
   }
 }
@@ -233,7 +369,8 @@ function playLandingSounds(p) {
 const TILT_K = 170, TILT_C = 8;     // raideur / amortissement de l'inclinaison
 const SQUASH_K = 260, SQUASH_C = 11; // raideur / amortissement de l'écrasement
 const LEAN = 0.085, MAX_TILT = 0.38;
-const HELD_LIFT = 0.42;  // hauteur de la pièce tenue
+const HELD_LIFT = 0.42;      // hauteur de la pièce tenue
+const SWAY_MIN_TILT = 0.03;  // en dessous (≈ 1,7°), le balancement reste silencieux
 const COM_Y = 0.35;      // hauteur approximative du centre de gravité
 const clampTilt = a => Math.max(-MAX_TILT, Math.min(MAX_TILT, a));
 
@@ -252,7 +389,9 @@ function varyJelly(p) {
 const JELLY_DEFAULT = { k: TILT_K, c: TILT_C, lean: 1, twist: 0, squash: 1 };
 
 const ZERO = new THREE.Vector3(), tmpV = new THREE.Vector3();
+let jellyClock = 0; // temps d'animation cumulé (secondes)
 function updateJelly(dt) {
+  jellyClock += dt;
   const ease = 1 - Math.exp(-dt * 9);
   for (const p of pieces) {
     const fx = p.fx, pos = p.mesh.position, w = p.mesh.userData.wobble;
@@ -285,6 +424,21 @@ function updateJelly(dt) {
     fx.lift += (liftTarget - fx.lift) * ease;
 
     // Rotation et écrasement autour du pivot : position = pivot − R·S·pivot
+    // Un son à chaque extrémité du balancement (quand l'inclinaison cesse de croître),
+    // seulement une fois la pièce posée : silence pendant qu'on la tient ou qu'elle se déplace.
+    const tiltMag = Math.hypot(fx.tx, fx.tz);
+    if (fx.lastTilt !== undefined) {
+      const rising = tiltMag > fx.lastTilt;
+      // Délai minimal compté en temps d'animation (et non à l'horloge) entre deux sons
+      const resting = !held && fx.lift < 0.05 && !tweens.has(p.mesh);
+      if (resting && fx.tiltRising && !rising && fx.lastTilt > SWAY_MIN_TILT && jellyClock - (fx.lastSwaySound ?? -1) > 0.09) {
+        Sound.play('sway', Math.min(1, fx.lastTilt / MAX_TILT)); // le bord du socle retape le plateau
+        fx.lastSwaySound = jellyClock;
+      }
+      fx.tiltRising = rising;
+    }
+    fx.lastTilt = tiltMag;
+
     w.rotation.set(fx.tx, 0, fx.tz);
     const side = 1 / Math.sqrt(fx.s); // volume conservé
     w.scale.set(side, fx.s, side);
@@ -358,8 +512,9 @@ function refreshHighlights() {
 // Sélection et interaction souris / tactile
 // =====================================================================
 function canPick(p) {
-  if (busy) return false;
+  if (busy || resetting) return false;
   if (mode === 'free') return true;
+  if (Online.active && p.white !== Online.isWhite) return false; // en ligne : uniquement ses pièces
   return !gameOver && p.sq >= 0 && p.white === whiteToMove();
 }
 
@@ -400,8 +555,8 @@ function tryMoveTo(s, offBoard = false) {
     freeMove(selected, -1);
     return true;
   }
-  if (s < 0 || board[s]) return false;
-  freeMove(selected, s);
+  if (s < 0 || board[s] === selected) return false;
+  freeMove(selected, s); // case occupée : la pièce présente sort du jeu
   return true;
 }
 
@@ -437,7 +592,7 @@ let drag = null; // { piece, x, y, active }
 
 // Écoute en phase de capture pour passer avant OrbitControls.
 window.addEventListener('pointerdown', e => {
-  if (e.target !== renderer.domElement || e.button !== 0 || busy) return;
+  if (e.target !== renderer.domElement || e.button !== 0 || busy || resetting) return;
   aim(e);
   const hitPiece = pickPiece();
   const pt = floorPoint();
@@ -447,6 +602,8 @@ window.addEventListener('pointerdown', e => {
   //    On teste la case de la pièce touchée, puis la case au sol sous le curseur
   //    (utile quand une pièce au premier plan masque la case visée).
   if (selected && hitPiece !== selected) {
+    // Mode libre : un clic vise une case vide ; cliquer une autre pièce la sélectionne
+    // (la prise en mode libre se fait en déposant la pièce par glisser-déposer).
     const isTarget = s => s >= 0 && (mode === 'rules' ? targets.some(t => t.to === s) : !board[s]);
     const dest = [hitPiece ? hitPiece.sq : -1, floorSq].find(isTarget);
     if (dest !== undefined) {
@@ -498,7 +655,7 @@ window.addEventListener('pointermove', e => {
   const s = squareAt(drag.target);
   const valid = mode === 'rules'
     ? targets.some(t => t.to === s)
-    : s >= 0 && (!board[s] || board[s] === drag.piece);
+    : s >= 0; // mode libre : toute case est valide (une pièce présente sortira du jeu)
   const newHover = valid ? s : -1;
   if (newHover !== hoverSq) { hoverSq = newHover; refreshHighlights(); }
 });
@@ -558,7 +715,7 @@ const btnFree = document.getElementById('mode-free');
 function refresh() {
   const side = whiteToMove() ? 'Blancs' : 'Noirs';
   statusDot.style.background = whiteToMove() ? '#f3ecdf' : '#1d1a18';
-  let text, alert = false;
+  let text, alert = false, result = null;
   gameOver = false;
 
   if (mode === 'free') {
@@ -570,6 +727,7 @@ function refresh() {
     if (!canMove) {
       gameOver = true;
       alert = check;
+      result = check ? { winner: whiteToMove() ? 'b' : 'w', reason: 'mate' } : { winner: null, reason: 'stalemate' };
       text = check
         ? `Échec et mat — les ${whiteToMove() ? 'Noirs' : 'Blancs'} gagnent`
         : 'Pat — partie nulle';
@@ -579,15 +737,35 @@ function refresh() {
     } else {
       text = `Trait aux ${side}`;
     }
+    // Pendule : drapeau tombé → perte au temps, sauf si l'adversaire ne peut plus mater
+    if (Clock.flagged && canMove) {
+      gameOver = true;
+      alert = true;
+      const loserWhite = Clock.flagged === 'w';
+      result = canStillMate(!loserWhite) ? { winner: loserWhite ? 'b' : 'w', reason: 'time' } : { winner: null, reason: 'time-draw' };
+      text = canStillMate(!loserWhite)
+        ? `Temps écoulé — les ${loserWhite ? 'Noirs' : 'Blancs'} gagnent`
+        : 'Temps écoulé — partie nulle (matériel insuffisant)';
+    }
   }
+  if (forcedResult && mode === 'rules') { // fin de partie simulée
+    gameOver = true;
+    alert = true;
+    result = forcedResult;
+    text = EndGame.describe(result).status;
+  }
+  if (resetting) text = 'Mise en place des pièces…';
   statusText.textContent = text;
   statusEl.classList.toggle('alert', alert);
+  EndGame.update(mode === 'rules' && !resetting ? result : null);
 
   hintEl.textContent = mode === 'rules'
     ? 'Cliquez ou glissez une pièce : seuls les coups légaux sont acceptés (roque, prise en passant et promotion compris).'
-    : 'Glissez n\'importe quelle pièce sur une case vide. Déposez-la hors du plateau pour la retirer, ou reprenez-la depuis la réserve.';
+    : 'Glissez n\'importe quelle pièce où vous voulez : déposée sur une autre pièce, celle-ci sort du jeu. Déposez-la hors du plateau pour la retirer, ou reprenez-la depuis la réserve.';
 
-  btnUndo.disabled = history.length === 0;
+  btnUndo.disabled = history.length === 0 || Online.active; // pas d'annulation en ligne
+  btnFree.disabled = Online.active;
+  Online.updateBanner();
   btnRules.classList.toggle('active', mode === 'rules');
   btnFree.classList.toggle('active', mode === 'free');
   renderLog();
@@ -596,9 +774,23 @@ function refresh() {
   refreshHighlights();
 }
 
+// L'adversaire peut-il encore mater ? Non s'il n'a que son roi, ou roi + un fou ou un cavalier.
+function canStillMate(white) {
+  const own = pieces.filter(p => p.sq >= 0 && p.white === white && p.type !== 'k');
+  if (own.length === 0) return false;
+  if (own.length === 1 && (own[0].type === 'b' || own[0].type === 'n')) return false;
+  return true;
+}
+Clock.onFlag = flag => {
+  if (flag) log.push({ kind: 'note', text: `Temps écoulé · ${canStillMate(flag !== 'w') ? (flag === 'w' ? '0-1' : '1-0') : '½-½'}` });
+  refresh();
+};
+
 function setMode(m) {
   if (mode === m) return;
+  if (Online.active && m === 'free') return; // pas de placement libre en partie en ligne
   mode = m;
+  Clock.setFrozen(m === 'free');
   clearSelection();
   refresh();
 }
@@ -606,7 +798,8 @@ function setMode(m) {
 btnRules.onclick = () => setMode('rules');
 btnFree.onclick = () => setMode('free');
 btnUndo.onclick = () => { if (history.length && !busy) { restore(history.pop()); Sound.play('undo'); } };
-document.getElementById('btn-reset').onclick = () => { if (!busy) { newGame(); Sound.play('reset'); } };
+document.getElementById('btn-reset').onclick = () => resetGame();
+document.getElementById('btn-online').onclick = () => Online.startHost(); // les pièces retournent à leur case en volant
 
 // Bouton son (activé / coupé, mémorisé)
 const btnSound = document.getElementById('btn-sound');
@@ -625,10 +818,14 @@ Music.onChange(({ enabled, playing, current }) => {
   btnMusic.classList.toggle('active', enabled);
   btnMusic.textContent = enabled ? '🎵 Musique' : '🔇 Musique';
   btnNext.disabled = !enabled;
-  nowPlaying.textContent = enabled && playing && current ? `♪ ${current.title} — ${current.author}` : '';
+  // Activée mais pas encore lancée : le navigateur attend une première action de l'utilisateur
+  nowPlaying.textContent = !enabled ? ''
+    : playing && current ? `♪ ${current.title} — ${current.author}`
+    : '♪ Cliquez n\'importe où pour lancer la musique';
   nowPlaying.title = nowPlaying.textContent;
 });
-btnMusic.onclick = () => Music.setEnabled(!Music.enabled);
+// Activée mais en attente (lecture bloquée par le navigateur) : le bouton la lance au lieu de la couper
+btnMusic.onclick = () => { if (Music.enabled && !Music.playing) Music.start(); else Music.setEnabled(!Music.enabled); };
 btnNext.onclick = () => Music.next();
 
 // Volume de la musique (0 à 100 %)
@@ -653,10 +850,45 @@ btnClear.onclick = () => {
   clearSelection(); layout(true); refresh();
 };
 
+// --- Rotation automatique de la caméra --------------------------------------
+// Active par défaut. La vitesse monte progressivement jusqu'au maximum choisi,
+// ralentit en douceur à l'arrêt, et plus vite quand on attrape une pièce.
+const ROTATE_MAX = 1.2;   // vitesse OrbitControls correspondant à 100 %
+let autoRotateWanted = true;
+let onHome = true; // écran d'accueil affiché : la caméra ne tourne pas
+let rotateLevel = 0.06;   // curseur (0 à 1), 6 % par défaut : rotation très lente
+let rotateRamp = 0;       // progression de la montée (0 à 1)
+let rotateSpeed = 0;      // vitesse réelle appliquée
+try {
+  const v = parseFloat(localStorage.getItem('chess3d:rotateSpeed'));
+  if (!Number.isNaN(v)) rotateLevel = Math.min(1, Math.max(0, v));
+} catch { }
+// Courbe en S (smoothstep) : départ très doux, accélération au milieu, arrivée en douceur.
+function updateAutoRotate(dt) {
+  const dragging = drag && drag.active;
+  // En pause pendant un vol de caméra et tant que l'encart de fin est affiché (roi vu de face)
+  if (autoRotateWanted && !onHome && !dragging && !CameraFly.active && !EndGame.visible) rotateRamp = Math.min(1, rotateRamp + dt / 4.5);   // 4,5 s pour atteindre le maximum
+  else rotateRamp = Math.max(0, rotateRamp - dt / (dragging ? 0.35 : 1.2));            // arrêt plus vif
+  const eased = rotateRamp * rotateRamp * (3 - 2 * rotateRamp);
+  rotateSpeed = rotateLevel * ROTATE_MAX * eased;
+  controls.autoRotate = rotateSpeed > 0.002;
+  controls.autoRotateSpeed = rotateSpeed;
+}
+const rotateInput = document.getElementById('rotate-speed');
+const rotateValue = document.getElementById('rotate-speed-value');
+rotateInput.value = Math.round(rotateLevel * 100);
+const showRotate = () => { rotateValue.textContent = `${rotateInput.value} %`; };
+showRotate();
+rotateInput.oninput = () => {
+  rotateLevel = rotateInput.value / 100;
+  showRotate();
+  try { localStorage.setItem('chess3d:rotateSpeed', String(rotateLevel)); } catch { }
+};
 const btnRotate = document.getElementById('btn-rotate');
+btnRotate.classList.add('active');
 btnRotate.onclick = () => {
-  controls.autoRotate = !controls.autoRotate;
-  btnRotate.classList.toggle('active', controls.autoRotate);
+  autoRotateWanted = !autoRotateWanted;
+  btnRotate.classList.toggle('active', autoRotateWanted);
 };
 document.getElementById('btn-white').onclick = () => setView('white');
 document.getElementById('btn-black').onclick = () => setView('black');
@@ -719,6 +951,9 @@ document.getElementById('btn-copy').onclick = async e => {
 // --- Panneaux déplaçables ----------------------------------------------
 makeDraggable(document.getElementById('ui'), 'controls');
 makeDraggable(document.getElementById('log'), 'log');
+makeDraggable(document.getElementById('gfx'), 'gfx');
+makeDraggable(document.getElementById('clock'), 'clock');
+makeDraggable(document.getElementById('chat'), 'chat');
 
 // --- Démarrage et boucle ----------------------------------------------
 // --- Thème des pièces --------------------------------------------------------
@@ -734,18 +969,22 @@ function fillThemeSelect() {
   }
   themeSelect.value = currentTheme;
 }
-function applyTheme(id) {
+// remote : choix reçu de l'adversaire en ligne (appliqué, mais ni mémorisé ni renvoyé)
+function applyTheme(id, { remote = false } = {}) {
+  if (id === currentTheme && themeSelect.value === id) return;
   setPieceTheme(id);
   themeSelect.value = currentTheme;
   for (const p of pieces) setMesh(p);
   layout(true); // reprend les déplacements en cours avec les nouveaux modèles
+  if (remote) return;
   try { localStorage.setItem('chess3d:theme', currentTheme); } catch { }
+  Online.sendStyle(); // partie en ligne : l'adversaire voit les mêmes pièces
 }
 themeSelect.onchange = () => applyTheme(themeSelect.value);
-// Par défaut : pièces médiévales (sauf choix mémorisé)
+// Par défaut : pièces Dragons (sauf choix mémorisé)
 let savedTheme = null;
 try { savedTheme = localStorage.getItem('chess3d:theme'); } catch { }
-setPieceTheme(savedTheme || 'medieval');
+setPieceTheme(savedTheme || 'dragons');
 fillThemeSelect();
 
 // --- Plateau -------------------------------------------------------------------
@@ -756,9 +995,11 @@ for (const [id, b] of Object.entries(BOARDS)) {
   o.textContent = b.name;
   boardSelect.appendChild(o);
 }
-function applyBoard(id) {
+function applyBoard(id, { remote = false } = {}) {
   boardSelect.value = setBoardTheme(id);
+  if (remote) return;
   try { localStorage.setItem('chess3d:board', currentBoard); } catch { }
+  Online.sendStyle(); // partie en ligne : l'adversaire voit le même plateau
 }
 boardSelect.onchange = () => applyBoard(boardSelect.value);
 let savedBoard = null;
@@ -767,11 +1008,81 @@ applyBoard(savedBoard || 'glass'); // par défaut : plateau Verre noir
 
 newGame();
 
+// Écran d'ouverture : le bouton « Jouer » s'active quand la scène est prête (premières
+// images rendues). Ce clic est le premier geste de l'utilisateur : il débloque la musique
+// et les sons, puis l'image apparaît en fondu depuis le noir.
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  const fade = document.getElementById('intro-fade');
+  const btn = document.getElementById('btn-start');
+  if (!fade || !btn) return;
+  btn.disabled = false;
+  btn.textContent = 'Jouer';
+  btn.focus();
+  let first = true;
+  const enter = after => {
+    onHome = false; // la rotation reprend, en douceur
+    Music.start();
+    fade.classList.remove('quick');
+    fade.classList.add('done');
+    after?.();
+    first = false;
+  };
+  // Une fois le fondu terminé, l'écran d'accueil est masqué (il reste disponible : bouton Accueil)
+  fade.addEventListener('transitionend', e => { if (e.target === fade && fade.classList.contains('done')) fade.style.display = 'none'; });
+  btn.onclick = () => enter(() => { if (first) Online.afterSplash(); }); // invité : saisie de son nom
+  // Servi par le serveur Node (et pas d'invitation en cours) : bouton « Jouer à deux en ligne »
+  const onlineBtn = document.getElementById('btn-start-online');
+  const showOnline = () => onlineBtn.classList.toggle('hidden', !(Online.served && !Online.invited && !Online.active));
+  showOnline();
+  onlineBtn.onclick = () => enter(() => Online.startHost());
+
+  // Bouton Accueil : confirmation, puis retour à l'écran d'ouverture.
+  // « Jouer » y démarre une nouvelle partie (l'échiquier est remis à zéro dès le retour).
+  const confirmEl = document.getElementById('confirm-home');
+  const goHome = () => {
+    confirmEl.classList.add('hidden');
+    if (Online.active) Online.leave(); // l'adversaire est prévenu
+    onHome = true;
+    forcedResult = null;
+    EndGame.hide();
+    newGame();
+    CameraFly.to(START_VIEW.position, START_VIEW.target, 900); // retour à la vue de départ
+    showOnline();
+    fade.style.display = '';
+    fade.classList.add('quick');
+    void fade.offsetWidth; // le navigateur applique l'état visible avant le fondu
+    fade.classList.remove('done');
+    setTimeout(() => btn.focus(), 50);
+  };
+  document.getElementById('btn-home').onclick = () => {
+    document.getElementById('confirm-home-text').textContent = Online.active
+      ? 'Vous quitterez la partie en ligne (votre adversaire en sera informé) et reviendrez à l\'écran d\'accueil.'
+      : 'Vous reviendrez à l\'écran d\'accueil. « Jouer » y démarre une nouvelle partie.';
+    confirmEl.classList.remove('hidden');
+    document.getElementById('confirm-home-no').focus();
+  };
+  document.getElementById('confirm-home-yes').onclick = goHome;
+  document.getElementById('confirm-home-no').onclick = () => confirmEl.classList.add('hidden');
+  confirmEl.addEventListener('click', e => { if (e.target === confirmEl) confirmEl.classList.add('hidden'); });
+  addEventListener('keydown', e => { if (e.key === 'Escape' && !confirmEl.classList.contains('hidden')) confirmEl.classList.add('hidden'); });
+}));
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  AA.resize();
 });
+
+// --- Anticrénelage ---------------------------------------------------------------
+const aaSelect = document.getElementById('aa-select');
+for (const [id, m] of Object.entries(AA.MODES)) {
+  const o = document.createElement('option');
+  o.value = id;
+  o.textContent = m.label;
+  aaSelect.appendChild(o);
+}
+aaSelect.value = AA.mode;
+aaSelect.onchange = () => { aaSelect.value = AA.setMode(aaSelect.value); };
 
 let lastTime = performance.now();
 renderer.setAnimationLoop(now => {
@@ -782,6 +1093,9 @@ renderer.setAnimationLoop(now => {
     drag.piece.mesh.position.lerp(drag.target, 1 - Math.exp(-dt * 16));
   }
   updateJelly(dt);
+  CameraFly.update(now);
+  updateAutoRotate(dt);
+  renderer.info.reset(); // compteurs d'une image complète (miroir et ombres compris), pour le panneau Debug
   controls.update();
-  renderer.render(scene, camera);
+  AA.render(); // rendu direct ou chaîne d'anticrénelage (voir antialias.js)
 });

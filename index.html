@@ -4,50 +4,279 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Échiquier 3D</title>
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Cinzel:wght@500;600&display=swap" rel="stylesheet" />
+  <script>
+    // Anti-cache : chaque chargement récupère la dernière version du CSS et des scripts du jeu.
+    window.CACHE_BUST = Date.now().toString(36);
+    document.write(`<link rel="stylesheet" href="css/style.css?v=${CACHE_BUST}" />`);
+  </script>
 </head>
 <body>
-  <div id="ui" class="panel">
-    <div class="panel-head" title="Glisser pour déplacer"><h1>♚ Échiquier 3D</h1><span class="grip">⠿</span></div>
-    <div class="seg">
-      <button id="mode-rules" class="active">Partie</button>
-      <button id="mode-free">Placement libre</button>
+  <!-- Logo vectoriel : roi Staunton doré, réutilisé (écran d'accueil, barre de menu, panneau) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#f3dc9c" /><stop offset=".45" stop-color="#c9a25e" /><stop offset="1" stop-color="#8a6a2f" />
+      </linearGradient>
+      <linearGradient id="gold-h" gradientUnits="userSpaceOnUse" x1="70" y1="0" x2="450" y2="0">
+        <stop offset="0" stop-color="#c9a25e" stop-opacity="0" /><stop offset=".5" stop-color="#e6c784" /><stop offset="1" stop-color="#c9a25e" stop-opacity="0" />
+      </linearGradient>
+      <symbol id="logo-king" viewBox="0 0 64 84">
+        <g fill="url(#gold)" stroke="#5e4720" stroke-width="1.2" stroke-linejoin="round">
+          <path d="M29 2h6v6h6v6h-6v7h-6v-7h-6V8h6z" />
+          <path d="M15 27c5-5 29-5 34 0l-5 10H20z" />
+          <rect x="18" y="37" width="28" height="4.5" rx="2" />
+          <path d="M23.5 41.5h17c-.5 9 1.5 16 6.5 23H17c5-7 7-14 6.5-23z" />
+          <rect x="13" y="64.5" width="38" height="5" rx="2.2" />
+          <path d="M9 74c0-3 2-4.5 4-4.5h38c2 0 4 1.5 4 4.5v4.5H9z" />
+        </g>
+        <path d="M20 29.5c6-3 18-3 24 0" fill="none" stroke="#fff3cf" stroke-opacity=".55" stroke-width="1.2" stroke-linecap="round" />
+      </symbol>
+    </defs>
+  </svg>
+  <!-- Écran d'ouverture : fond noir, bouton « Jouer », puis fondu vers le jeu (géré par main.js) -->
+  <div id="intro-fade">
+    <div class="splash">
+      <svg class="splash-crest" aria-hidden="true"><use href="#logo-king" /></svg>
+      <h1 class="wordmark" aria-label="Échiquier">
+        <svg viewBox="0 0 520 120" role="img" aria-hidden="true">
+          <text x="260" y="70" text-anchor="middle">Échiquier</text>
+          <g class="filet">
+            <path d="M70 96h165M285 96h165" stroke="url(#gold-h)" stroke-width="1.4" />
+            <path d="M260 88l8 8-8 8-8-8z M240 96l4-4 4 4-4 4z M272 96l4-4 4 4-4 4z" fill="#c9a25e" />
+          </g>
+        </svg>
+      </h1>
+      <p>Dragons, chevaliers et pièces de bois</p>
+      <button id="btn-start" disabled>Chargement…</button>
+      <div><button id="btn-start-online" class="splash-secondary hidden">🌐 Jouer à deux en ligne</button></div>
     </div>
-    <div id="status"><span class="dot"></span><span id="status-text"></span></div>
-    <p class="hint" id="hint"></p>
-    <label class="theme-row">Pièces
-      <select id="theme-select"></select>
-    </label>
-    <label class="theme-row">Plateau
-      <select id="board-select"></select>
-    </label>
-    <div class="row">
-      <button id="btn-undo">↶ Annuler</button>
-      <button id="btn-view" disabled title="Sélectionnez une pièce pour la visualiser">🔍 Visualiser</button>
-      <button id="btn-reset">Nouvelle partie</button>
-      <button id="btn-turn" class="hidden">Changer le trait</button>
-      <button id="btn-clear" class="hidden">Vider le plateau</button>
-    </div>
-    <div class="row">
-      <button id="btn-white">Vue blancs</button>
-      <button id="btn-black">Vue noirs</button>
-      <button id="btn-top">Dessus</button>
-      <button id="btn-rotate">Rotation</button>
-      <button id="btn-sound" title="Activer ou couper le son">🔊 Son</button>
-    </div>
-    <div class="row music-row">
-      <button id="btn-music" title="Activer ou couper la musique">🎵 Musique</button>
-      <button id="btn-next" title="Morceau suivant (au hasard)">⏭</button>
-      <label class="volume" title="Volume de la musique">
-        <input type="range" id="music-volume" min="0" max="100" step="1" aria-label="Volume de la musique" />
-        <span id="music-volume-value"></span>
-      </label>
-    </div>
-    <p id="now-playing" class="now-playing"></p>
-    <p class="hint">Caméra : glisser dans le vide pour tourner · molette pour zoomer · clic droit pour déplacer</p>
+    <footer class="credits">
+      <div class="authors">
+        <div><span class="name">Yanik Lupien</span><span class="role">Conception et direction artistique</span></div>
+        <div><span class="name">Claude <small>(Anthropic)</small></span><span class="role">Programmation et modélisation 3D</span></div>
+      </div>
+      <p class="assets">Musiques : cynicmusic, Umplix, RandomMind, Yoiyami, Écrivain, Tarush Singhal, bobjt, Stereoscopic
+        · Sons de pièces : JJTaynos (libres de droits, CC0) · Moteur 3D : Three.js</p>
+    </footer>
+  </div>
+  <script>
+    // Sécurité : si un script échoue, le bouton finit par s'activer et ouvre au moins la page
+    setTimeout(() => {
+      const b = document.getElementById('btn-start');
+      if (b && b.disabled) {
+        b.disabled = false; b.textContent = 'Jouer';
+        b.onclick = () => document.getElementById('intro-fade').classList.add('done');
+      }
+    }, 12000);
+  </script>
+  <nav id="menubar" aria-label="Panneaux">
+    <button id="btn-home" title="Revenir à l'écran d'accueil"><svg class="logo-mini" aria-hidden="true"><use href="#logo-king" /></svg>Accueil</button>
+    <button data-panel="ui" title="Afficher / masquer le panneau de contrôle">🎛 Contrôles</button>
+    <button data-panel="gfx" title="Afficher / masquer les réglages graphiques">🎨 Graphismes</button>
+    <button data-panel="log" title="Afficher / masquer le journal des déplacements">📜 Déplacements</button>
+    <button data-panel="clock" title="Afficher / masquer la pendule">⏱ Pendule</button>
+    <button data-panel="chat" id="btn-chat" class="hidden" title="Échanger des messages avec l'autre joueur">💬 Messagerie<span id="chat-badge" class="badge hidden"></span></button>
+    <button data-panel="debug" title="Afficher / masquer les informations de débogage">🐞 Debug</button>
+  </nav>
+
+  <div id="ui" class="panel hidden">
+    <div class="panel-head" title="Glisser pour déplacer"><h1 class="brand"><svg class="logo-mini" aria-hidden="true"><use href="#logo-king" /></svg>Échiquier</h1><span class="grip">⠿</span></div>
+
+    <section class="section">
+      <h3 class="section-title">Partie</h3>
+      <div class="seg">
+        <button id="mode-rules" class="active">Partie</button>
+        <button id="mode-free">Placement libre</button>
+      </div>
+      <div id="status"><span class="dot"></span><span id="status-text"></span></div>
+      <p class="hint" id="hint"></p>
+      <div class="row">
+        <button id="btn-undo">↶ Annuler</button>
+        <button id="btn-view" disabled title="Sélectionnez une pièce pour la visualiser">🔍 Visualiser</button>
+        <button id="btn-reset">Nouvelle partie</button>
+        <button id="btn-online" title="Inviter un second joueur avec un lien à partager">🌐 Nouvelle partie multijoueur</button>
+        <button id="btn-turn" class="hidden">Changer le trait</button>
+        <button id="btn-clear" class="hidden">Vider le plateau</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h3 class="section-title">Caméra</h3>
+      <div class="row">
+        <button id="btn-white">Vue blancs</button>
+        <button id="btn-black">Vue noirs</button>
+        <button id="btn-top">Dessus</button>
+      </div>
+      <div class="slider-row">
+        <button id="btn-rotate" title="Rotation automatique de la caméra">⟳ Rotation</button>
+        <input type="range" id="rotate-speed" min="0" max="100" step="1" aria-label="Vitesse de rotation" title="Vitesse de rotation" />
+        <span class="value" id="rotate-speed-value"></span>
+      </div>
+      <p class="hint">Glisser dans le vide pour tourner · molette pour zoomer · clic droit pour déplacer</p>
+    </section>
+
+    <section class="section">
+      <h3 class="section-title">Audio</h3>
+      <div class="row">
+        <button id="btn-sound" title="Activer ou couper les sons du jeu">🔊 Son</button>
+        <button id="btn-music" title="Activer ou couper la musique">🎵 Musique</button>
+        <button id="btn-next" title="Morceau suivant (au hasard)">⏭</button>
+      </div>
+      <div class="slider-row">
+        <span class="slider-label">Volume musique</span>
+        <input type="range" id="music-volume" min="0" max="100" step="1" aria-label="Volume de la musique" title="Volume de la musique" />
+        <span class="value" id="music-volume-value"></span>
+      </div>
+      <p id="now-playing" class="now-playing"></p>
+    </section>
   </div>
 
-  <div id="log" class="panel">
+  <!-- Parties en ligne : nom, invitation (URL à partager), invité -->
+  <!-- Confirmation avant de quitter une partie en cours pour l'écran d'accueil -->
+  <div id="confirm-home" class="modal hidden" role="dialog" aria-label="Quitter la partie">
+    <div class="ol-card">
+      <div class="ol-step">
+        <svg class="ol-logo" aria-hidden="true"><use href="#logo-king" /></svg>
+        <h2>Quitter la partie ?</h2>
+        <p id="confirm-home-text">Vous reviendrez à l'écran d'accueil. « Jouer » y démarre une nouvelle partie.</p>
+        <div class="ol-url"><button id="confirm-home-no" class="ol-primary" style="flex:1">Continuer la partie</button><button id="confirm-home-yes" style="flex:1">Quitter la partie</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="online" class="hidden" role="dialog" aria-label="Partie en ligne">
+    <div class="ol-card">
+      <button class="ol-close" id="ol-close" title="Fermer">✕</button>
+      <div class="ol-step" data-step="host-name">
+        <div class="ol-crest">🌐</div>
+        <h2>Partie en ligne</h2>
+        <p>Entrez votre nom. Vous jouerez les <b>Blancs</b>.</p>
+        <input id="ol-host-name" maxlength="24" placeholder="Votre nom" autocomplete="nickname" />
+        <button id="ol-create" class="ol-primary">Créer la partie</button>
+      </div>
+      <div class="ol-step hidden" data-step="invite">
+        <div class="ol-crest">♔</div>
+        <h2>Invitez un ami</h2>
+        <p>Partagez ce lien avec le second joueur :</p>
+        <div class="ol-url"><input id="ol-url" readonly /><button id="ol-copy" class="ol-primary">Copier l'URL</button></div>
+        <p class="ol-hint" id="ol-lan"></p>
+        <div class="ol-guest">
+          <span class="ol-label">Second joueur · Noirs</span>
+          <span id="ol-guest-name" class="ol-live waiting">En attente du second joueur…</span>
+        </div>
+      </div>
+      <div class="ol-step hidden" data-step="guest-name">
+        <div class="ol-crest">♚</div>
+        <h2 id="ol-invite-title">Vous êtes invité</h2>
+        <p>Entrez votre nom. Vous jouerez les <b>Noirs</b>.</p>
+        <input id="ol-guest-input" maxlength="24" placeholder="Votre nom" autocomplete="nickname" />
+        <button id="ol-play" class="ol-primary">Jouer</button>
+      </div>
+      <div class="ol-step hidden" data-step="rematch">
+        <div class="ol-crest">↺</div>
+        <h2 id="ol-rematch-title">Nouvelle partie ?</h2>
+        <p>La partie en cours sera abandonnée et les pièces remises en place.</p>
+        <div class="ol-url"><button id="ol-rematch-yes" class="ol-primary" style="flex:1">Accepter</button><button id="ol-rematch-no" style="flex:1">Refuser</button></div>
+      </div>
+      <div class="ol-step hidden" data-step="left">
+        <div class="ol-crest">🚪</div>
+        <h2 id="ol-left-title">Votre adversaire a quitté la partie</h2>
+        <p id="ol-left-text"></p>
+        <button id="ol-left-solo" class="ol-primary">Continuer en solo</button>
+      </div>
+      <div class="ol-step hidden" data-step="error">
+        <div class="ol-crest">⚠</div>
+        <h2>Partie en ligne indisponible</h2>
+        <p id="ol-error"></p>
+        <button id="ol-solo">Jouer en solo</button>
+      </div>
+    </div>
+  </div>
+  <div id="online-banner" class="hidden"></div>
+
+  <div id="chat" class="panel hidden">
+    <div class="panel-head" title="Glisser pour déplacer"><h2>Messagerie</h2><span class="grip">⠿</span></div>
+    <div id="chat-list" aria-live="polite"><p class="hint chat-empty">Aucun message pour l'instant.</p></div>
+    <form id="chat-form" class="chat-form" autocomplete="off">
+      <input id="chat-input" maxlength="300" placeholder="Votre message…" />
+      <button type="submit" class="ol-primary">Envoyer</button>
+    </form>
+  </div>
+
+  <div id="endgame" class="hidden" role="dialog" aria-live="polite" aria-label="Fin de partie">
+    <div class="eg-crest" id="eg-crest">♔</div>
+    <div class="eg-label">Partie terminée</div>
+    <div class="eg-title" id="eg-title"></div>
+    <div class="eg-reason" id="eg-reason"></div>
+    <div class="eg-score" id="eg-score"></div>
+    <div class="eg-meta" id="eg-meta"></div>
+    <div class="eg-actions">
+      <button id="eg-new">Nouvelle partie</button>
+      <button id="eg-close">Voir le plateau</button>
+    </div>
+  </div>
+
+  <div id="clock" class="panel hidden">
+    <div class="panel-head" title="Glisser pour déplacer"><h2>Pendule</h2><span class="grip">⠿</span></div>
+    <div class="clock-face" id="clock-b"><span class="who"><span class="dot b"></span>Noirs</span><span class="time">—:—</span></div>
+    <div class="clock-face" id="clock-w"><span class="who"><span class="dot w"></span>Blancs</span><span class="time">—:—</span></div>
+    <p class="hint" id="clock-info"></p>
+    <section class="section">
+      <h3 class="section-title">Cadence</h3>
+      <label class="theme-row"><span>Cadence</span><select id="clock-control"></select></label>
+      <div class="row">
+        <button id="clock-pause">⏸ Pause</button>
+        <button id="clock-reset" title="Remet les deux pendules au temps de départ">↺ Réinitialiser</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="gfx" class="panel hidden">
+    <div class="panel-head" title="Glisser pour déplacer"><h2>Graphismes</h2><span class="grip">⠿</span></div>
+
+    <section class="section">
+      <h3 class="section-title">Thème</h3>
+      <label class="theme-row"><span>Pièces</span>
+        <select id="theme-select"></select>
+      </label>
+      <label class="theme-row"><span>Plateau</span>
+        <select id="board-select"></select>
+      </label>
+    </section>
+
+    <section class="section">
+      <h3 class="section-title">Rendu</h3>
+      <label class="theme-row" title="Lissage des contours (plus coûteux en bas de la liste)"><span>Anticrénelage</span>
+        <select id="aa-select"></select>
+      </label>
+    </section>
+  </div>
+
+  <div id="debug" class="panel hidden">
+    <div class="panel-head" title="Glisser pour déplacer">
+      <h2>Debug</h2>
+      <button id="debug-copy" title="Copier position, cible et champ de vision de la caméra">Copier la caméra</button>
+      <span class="grip">⠿</span>
+    </div>
+    <table><tbody id="debug-body"></tbody></table>
+    <section class="section">
+      <h3 class="section-title">Simuler une fin de partie</h3>
+      <div class="row debug-sim">
+        <button data-sim="w,mate">Mat · Blancs gagnent</button>
+        <button data-sim="b,mate">Mat · Noirs gagnent</button>
+        <button data-sim="w,time">Temps · Blancs gagnent</button>
+        <button data-sim="b,time">Temps · Noirs gagnent</button>
+        <button data-sim="b,resign">Abandon des Blancs</button>
+        <button data-sim=",stalemate">Pat</button>
+        <button data-sim=",material">Matériel insuffisant</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="log" class="panel hidden">
     <div class="panel-head" title="Glisser pour déplacer">
       <h2>Déplacements</h2>
       <button id="btn-copy" title="Copier la liste des coups">Copier</button>
@@ -98,15 +327,22 @@
     import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
     import { Reflector } from 'three/addons/objects/Reflector.js';
     import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-    Object.assign(window, { THREE, OrbitControls, RoomEnvironment, Reflector, BufferGeometryUtils });
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+    import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+    import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+    import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+    Object.assign(window, { THREE, OrbitControls, RoomEnvironment, Reflector, BufferGeometryUtils,
+      EffectComposer, RenderPass, OutputPass, ShaderPass, SMAAPass, FXAAShader });
 
     // Les fichiers du jeu sont des scripts classiques (et non des modules) :
     // ainsi la page fonctionne aussi ouverte directement depuis le disque (file://).
-    const FILES = ['scene', 'boards', 'pieces', 'medieval', 'rules', 'notation', 'panels', 'sound', 'music', 'viewer', 'main'];
+    const FILES = ['scene', 'antialias', 'boards', 'pieces', 'medieval', 'dragons', 'crystal', 'rules', 'notation', 'panels', 'sound', 'music', 'viewer', 'clock', 'endgame', 'online', 'main', 'debug'];
     for (const name of FILES) {
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = `js/${name}.js`;
+        s.src = `js/${name}.js?v=${window.CACHE_BUST}`; // anti-cache
         s.onload = resolve;
         s.onerror = () => reject(new Error(`Impossible de charger js/${name}.js`));
         document.body.appendChild(s);

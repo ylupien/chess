@@ -1,0 +1,12 @@
+# Seul le nécessaire entre dans l'image
+.git
+.gitignore
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+node_modules
+Dockerfile
+docker-compose.yml
+.dockerignore
+*.log

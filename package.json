@@ -1,0 +1,17 @@
+{
+  "name": "echiquier-3d",
+  "version": "1.0.0",
+  "description": "Jeu d'échecs 3D dans le navigateur (Three.js), avec parties en ligne à deux joueurs.",
+  "private": true,
+  "type": "commonjs",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

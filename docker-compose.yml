@@ -1,0 +1,70 @@
+# Serveur de jeu et tunnel Cloudflare, chacun dans un conteneur verrouillé.
+#
+#   scripts/web.sh publish           → une seule fois : crée le tunnel et le DNS, puis démarre
+#   docker compose up -d             → jeu sur http://localhost:8080 ET https://echecs.news-analytics.info
+#   docker compose logs -f           → journaux
+#   docker compose down              → arrêt (le site public est retiré)
+#
+# Le port du jeu n'est publié que sur 127.0.0.1 (usage local). Le public passe par le tunnel :
+# connexion sortante vers Cloudflare, aucun port ouvert sur la machine ni sur le routeur.
+services:
+  chess:
+    build: .
+    image: echiquier-3d:latest
+    container_name: echiquier-3d
+    restart: unless-stopped
+    init: true                      # relaie les signaux et ramasse les processus zombies
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      TRUST_PROXY: "cloudflare"     # limites par adresse : adresse réelle via CF-Connecting-IP
+      MAX_ROOMS: "500"
+      MAX_CONN_PER_IP: "10"
+    # --- Isolation vis-à-vis du système hôte ---
+    user: "65532:65532"             # utilisateur sans privilège
+    read_only: true                 # système de fichiers en lecture seule
+    tmpfs:
+      - /tmp:size=8m,noexec,nosuid,nodev
+    cap_drop: [ALL]                 # aucune capacité Linux (le port 8080 n'en demande pas)
+    security_opt:
+      - no-new-privileges:true      # impossible de regagner des droits (setuid…)
+    # --- Ressources bornées : un abus ne peut pas saturer la machine ---
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 1.0
+    pids_limit: 64
+    ulimits:
+      nofile: { soft: 4096, hard: 4096 }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks: [chess]
+
+  # Tunnel Cloudflare : relie https://echecs.news-analytics.info au jeu par le réseau interne.
+  # Configuration et identifiants générés par scripts/web.sh dans deploy/cloudflared/ (hors Git).
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.3
+    container_name: echiquier-3d-tunnel
+    restart: unless-stopped
+    depends_on: [chess]
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./deploy/cloudflared:/etc/cloudflared:ro
+    # Votre uid (sans privilège) : seul à pouvoir lire les identifiants du tunnel (mode 600)
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks: [chess]
+
+networks:
+  chess:
+    driver: bridge

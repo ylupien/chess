@@ -22,6 +22,17 @@ const BOARDS = (() => {
     color: 0xe4e5ea, roughness: 0.2, metalness: 0, clearcoat: 0.7, clearcoatRoughness: 0.22,
     specularIntensity: 0.35, transparent: true, opacity: 0.93,
   });
+  // Les cases restent semi-transparentes, mais sont dessinées avec les objets opaques
+  // (mélange personnalisé, après le miroir) : les pièces en verre (thème Cristal) voient
+  // ainsi le damier à travers elles. Un objet « transparent » en serait exclu.
+  for (const m of [glassDark, glassLight]) {
+    m.transparent = false;
+    m.blending = THREE.CustomBlending;
+    m.blendSrc = THREE.SrcAlphaFactor;
+    m.blendDst = THREE.OneMinusSrcAlphaFactor;
+  }
+  for (const sq of boardSquares) sq.renderOrder = 1; // après le miroir (ordre 0)
+
   const lacquer = new THREE.MeshPhysicalMaterial({
     color: 0x09090b, roughness: 0.25, metalness: 0.1, clearcoat: 0.7, clearcoatRoughness: 0.18, specularIntensity: 0.5,
   });
@@ -38,6 +49,23 @@ const BOARDS = (() => {
   mirror.rotation.x = -Math.PI / 2;
   mirror.position.y = -0.003;
   glassExtras.add(mirror);
+
+  // Cohabitation avec les pièces en verre (thème Cristal) : Three.js prépare dans une image
+  // unique ce qu'on voit à travers le verre. Le reflet du miroir, calculé par un rendu imbriqué,
+  // l'écraserait (pièces noires opaques). Donc :
+  //   - pas de mise à jour du reflet pendant cette préparation (celui de l'image précédente sert) ;
+  //   - dans le reflet, le verre est rendu en simple transparence, sans réfraction.
+  const reflect = mirror.onBeforeRender;
+  mirror.onBeforeRender = function (renderer, scn, cam, ...rest) {
+    const rt = renderer.getRenderTarget();
+    if (rt && rt.texture.minFilter === THREE.LinearMipmapLinearFilter && rt.samples === 4) return; // préparation du verre
+    const glassy = new Set();
+    scn.traverseVisible(o => { if (o.isMesh && o.material.transmission > 0) glassy.add(o.material); });
+    const saved = [...glassy].map(m => [m, m.transmission, m.transparent, m.opacity]);
+    for (const m of glassy) { m.transmission = 0; m.transparent = true; m.opacity = 0.4; }
+    try { reflect.call(this, renderer, scn, cam, ...rest); }
+    finally { for (const [m, t, tr, op] of saved) { m.transmission = t; m.transparent = tr; m.opacity = op; } }
+  };
 
   // Filets dorés entre les cases
   const line = (w, d, x, z, y = 0.0015) => {

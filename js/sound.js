@@ -125,6 +125,11 @@ const Sound = (() => {
     },
     // Nouvelle partie : les pièces se remettent en place
     reset: () => { for (let i = 0; i < 7; i++) hit(i * 0.07 + Math.random() * 0.03, { gain: 0.75 }); },
+    // Balancement d'une pièce posée : le bord du socle retape le plateau (amp de 0 à 1)
+    sway: (amp = 0.5) => {
+      const k = Math.min(1, Math.max(0, amp));
+      hit(0, { gain: 0.1 + 0.35 * k, rate: vary(0.72, 0.06) });
+    },
     // Interface
     click: () => {
       noise({ dur: 0.015, gain: 0.07, freq: 3500, q: 3 });

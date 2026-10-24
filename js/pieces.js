@@ -293,6 +293,12 @@ function mergeByRole(group) {
     if (!g.index) g.setIndex([...Array(g.attributes.position.count).keys()]);
     g.clearGroups();
     g.applyMatrix4(o.matrixWorld);
+    // Une transformation en miroir retourne les faces : on rétablit l'ordre des sommets
+    if (o.matrixWorld.determinant() < 0) {
+      const idx = g.index.array;
+      for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
+      g.computeVertexNormals();
+    }
     const role = o.userData.role || 'body';
     if (!byRole.has(role)) byRole.set(role, []);
     byRole.get(role).push(g);
@@ -341,12 +347,13 @@ function buildModel(type, white) {
   const { id, theme, tpl } = getTemplate(type);
   const m = tpl.clone();
   // Rayon du socle, en unités du plateau : pieds classiques (voir foot()) ou socle médiéval
-  const footR = id === 'classic' ? { p: 0.82, n: 0.95, b: 0.92, r: 0.95, q: 1, k: 1 }[type] : 0.86;
+  const classicShape = id === 'classic' || theme.shape === 'classic'; // Classique et Cristal
+  const footR = classicShape ? { p: 0.82, n: 0.95, b: 0.92, r: 0.95, q: 1, k: 1 }[type] : 0.86;
   m.userData.baseRadius = footR * PIECE_SCALE;
   const mats = theme.materials(white);
   m.traverse(o => { if (o.isMesh) o.material = mats[o.userData.role] || mats.body; });
   m.scale.setScalar(PIECE_SCALE);
-  if (id === 'classic') {
+  if (classicShape) {
     // Cavaliers tournés vers l'adversaire ; les autres pièces pivotées au hasard
     // pour que le veinage du bois varie d'une pièce à l'autre.
     if (type === 'n') m.rotation.y = white ? Math.PI / 2 : -Math.PI / 2;
