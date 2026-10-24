@@ -32,6 +32,7 @@ const Music = (() => {
   const FADE_MS = 10000; // montée de 0 au volume choisi en 10 secondes
 
   let audio = null, current = null, lastIndex = -1, fadeTimer = null;
+  let blocked = null; // morceau prêt dont la lecture a été refusée : réessayé au premier clic
   let firstPlayed = false; // « Calm Piano » tant qu'aucun morceau n'a réellement démarré
   let enabled = true, playing = false;
   let level = 0.06; // volume choisi par l'utilisateur (0 à 1), 6 % par défaut
@@ -72,23 +73,39 @@ const Music = (() => {
     }, 50);
   }
 
+  // Un seul morceau est téléchargé à la fois : celui qui joue. Le morceau quitté est vidé,
+  // ce qui interrompt aussi son téléchargement s'il n'était pas terminé.
+  function release(a) {
+    a.onended = a.onerror = null;
+    a.pause();
+    a.removeAttribute('src');
+    a.load();
+  }
+
+  function play(a) {
+    a.play()
+      .then(() => { if (audio === a) { blocked = null; firstPlayed = true; fadeIn(a); } })
+      .catch(() => { if (audio === a) { blocked = a; playing = false; notify(); } }); // lecture refusée (pas encore d'action de l'utilisateur)
+    playing = true;
+    notify();
+  }
+
   function playNext() {
-    if (audio) { audio.onended = audio.onerror = null; audio.pause(); }
+    if (audio) release(audio);
+    blocked = null;
     current = pick();
     const a = audio = new Audio(current.src);
     a.volume = 0;
     a.onended = () => { if (playing && audio === a) playNext(); };
     a.onerror = () => { if (playing && audio === a) setTimeout(playNext, 1000); }; // fichier illisible : on passe au suivant
-    a.play()
-      .then(() => { firstPlayed = true; fadeIn(a); })
-      .catch(() => { if (audio === a) { playing = false; notify(); } }); // lecture refusée (pas encore d'action de l'utilisateur)
-    playing = true;
-    notify();
+    play(a);
   }
 
   function start() {
     if (!enabled || playing) return;
-    playNext();
+    // Lecture refusée plus tôt : on relance le même morceau, déjà téléchargé
+    if (blocked && blocked === audio) play(blocked);
+    else playNext();
   }
 
   function stop() {

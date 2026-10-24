@@ -274,6 +274,31 @@ const templateCache = {}; // « thème:type » → modèle (les pièces en sont 
 function registerTheme(id, theme) { THEMES[id] = theme; }
 function setPieceTheme(id) { if (THEMES[id]) currentTheme = id; return currentTheme; }
 
+// Thèmes chargés à la demande : le fichier d'un thème (js/<id>.js, plusieurs dizaines de Ko)
+// n'est téléchargé que lorsqu'on le choisit. Au démarrage, seul le thème mémorisé est chargé.
+const THEME_FILES = { medieval: 'Médiéval', dragons: 'Dragons', crystal: 'Cristal' };
+const THEME_IDS = ['classic', ...Object.keys(THEME_FILES)]; // ordre du sélecteur
+const isTheme = id => THEME_IDS.includes(id);
+const themeName = id => THEMES[id]?.name || THEME_FILES[id];
+const themeLoads = {};
+function loadTheme(id) {
+  if (THEMES[id]) return Promise.resolve(true);
+  if (!isTheme(id)) return Promise.resolve(false);
+  return themeLoads[id] ??= new Promise(resolve => {
+    const s = document.createElement('script');
+    s.src = `js/${id}.js${window.CACHE_BUST || ''}`;
+    s.onload = () => resolve(!!THEMES[id]);
+    s.onerror = () => { delete themeLoads[id]; console.error(`Impossible de charger js/${id}.js`); resolve(false); };
+    document.body.appendChild(s);
+  });
+}
+// Thème du démarrage : celui mémorisé, sinon Dragons
+const startupTheme = (() => {
+  let saved = null;
+  try { saved = localStorage.getItem('chess3d:theme'); } catch { }
+  return isTheme(saved) ? saved : 'dragons';
+})();
+
 // Fusionne toutes les parties d'un modèle qui partagent le même rôle de matériau
 // en un seul maillage. Un personnage médiéval passe ainsi d'environ 85 objets à
 // une quinzaine : c'est le nombre d'objets (appels de dessin), bien plus que le
@@ -368,4 +393,4 @@ function buildModel(type, white) {
 }
 
 // Nombre de pièces réellement modélisées par un thème (pour le sélecteur)
-const themeProgress = id => Object.keys(THEMES[id].builders).length;
+const themeProgress = id => THEMES[id] ? Object.keys(THEMES[id].builders).length : 6;

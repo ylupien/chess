@@ -1,7 +1,7 @@
 # Serveur de jeu et tunnel Cloudflare, chacun dans un conteneur verrouillé.
 #
 #   scripts/web.sh publish           → une seule fois : crée le tunnel et le DNS, puis démarre
-#   docker compose up -d             → jeu sur http://localhost:8080 ET https://echecs.news-analytics.info
+#   docker compose up -d             → jeu sur http://localhost:8080 ET sur l'adresse publique (.env)
 #   docker compose logs -f           → journaux
 #   docker compose down              → arrêt (le site public est retiré)
 #
@@ -40,7 +40,7 @@ services:
       options: { max-size: "10m", max-file: "3" }
     networks: [chess]
 
-  # Tunnel Cloudflare : relie https://echecs.news-analytics.info au jeu par le réseau interne.
+  # Tunnel Cloudflare : relie l'adresse publique (PUBLIC_HOSTNAME, .env) au jeu par le réseau interne.
   # Configuration et identifiants générés par scripts/web.sh dans deploy/cloudflared/ (hors Git).
   tunnel:
     image: cloudflare/cloudflared:2026.10.3

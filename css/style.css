@@ -231,3 +231,21 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.22); box-shadow: 0 0 0 4px rgba(229,72,77,.25); border-color: var(--danger); }
 }
+
+/* Thème de pièces en cours de téléchargement */
+body.loading-theme, body.loading-theme * { cursor: progress !important; }
+
+/* Barres de défilement fines, aux couleurs dorées du thème (journal, messagerie, panneaux…) */
+:root { --scroll-thumb: rgba(201, 162, 94, .45); --scroll-thumb-hover: rgba(230, 199, 132, .85); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--scroll-thumb-hover), var(--scroll-thumb));
+  border-radius: 8px; border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); border-width: 1px; background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+/* Firefox (qui ignore les règles ci-dessus) */
+@supports (-moz-appearance: none) {
+  * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+}

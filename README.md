@@ -3,8 +3,9 @@
 Un jeu d'échecs en 3D dans le navigateur, construit avec [Three.js](https://threejs.org/).
 Les pièces et les plateaux sont entièrement générés par le code : aucune image ni aucun modèle 3D externe.
 
-> **Jouer en ligne : https://echecs.news-analytics.info**
+> **Exemple d'instance en ligne : https://echecs.news-analytics.info**
 > Ouvrez l'adresse, cliquez **🌐 Jouer à deux en ligne**, puis envoyez l'URL d'invitation à votre adversaire.
+> ⚠️ Ce serveur tourne sur un ordinateur personnel, à la maison : il peut être hors ligne à tout moment. Pour jouer sans dépendre de lui, ouvrez simplement `index.html` (jeu solo) ou lancez votre propre serveur (voir plus bas).
 
 ## Lancer le jeu
 
@@ -64,7 +65,7 @@ Variables d'environnement :
 
 ### Publier sur le web (Cloudflare Tunnel)
 
-Le site est publié sur **https://echecs.news-analytics.info** par un second conteneur, `tunnel` (image officielle `cloudflare/cloudflared`).
+Le site est publié sur l'adresse de votre choix (un sous-domaine d'un domaine géré par votre compte Cloudflare) par un second conteneur, `tunnel` (image officielle `cloudflare/cloudflared`).
 
 - Il ouvre une connexion **sortante** vers Cloudflare et transmet les visites au jeu par le réseau Docker interne.
 - Aucun port n'est ouvert sur la machine ni sur le routeur. HTTPS et WebSocket (`wss://`) sont gérés par Cloudflare.
@@ -72,7 +73,8 @@ Le site est publié sur **https://echecs.news-analytics.info** par un second con
 - Il n'accède qu'à ses identifiants, en lecture seule.
 
 ```
-scripts/web.sh publish   # une seule fois : crée le tunnel « echecs » et le DNS, puis démarre le projet
+cp .env.example .env     # une seule fois : indiquez votre adresse (PUBLIC_HOSTNAME)
+scripts/web.sh publish   # une seule fois : crée le tunnel et le DNS, puis démarre le projet
 docker compose up -d     # ensuite : chaque démarrage du projet publie le site
 docker compose down      # arrêt : le site public est retiré
 scripts/web.sh status    # état des conteneurs, du tunnel et du site
@@ -82,9 +84,9 @@ scripts/web.sh logs      # journaux du tunnel
 
 - **Prérequis** : `cloudflared` installé et connecté au compte (`cloudflared tunnel login`, qui crée `~/.cloudflared/cert.pem`). Le script ignore `~/.cloudflared/config.yml`.
 - **Identifiants** : la configuration et les identifiants du tunnel sont écrits dans `deploy/cloudflared/` (mode 600, hors Git).
-- **Autre adresse** : `HOSTNAME_PUBLIC=autre.domaine.com TUNNEL_NAME=autre scripts/web.sh publish`.
+- **Configuration** : `.env` (hors Git, modèle `.env.example`) contient `PUBLIC_HOSTNAME` (adresse publique) et `TUNNEL_NAME` (nom du tunnel, `echecs` par défaut). Une variable passée sur la ligne de commande l'emporte : `PUBLIC_HOSTNAME=autre.domaine.com scripts/web.sh publish`.
 - **Disponibilité** : le site n'est en ligne que lorsque WSL et Docker tournent.
-- **Suppression définitive** : supprimez l'enregistrement DNS dans le tableau de bord Cloudflare, puis le tunnel (`cloudflared tunnel delete echecs`).
+- **Suppression définitive** : supprimez l'enregistrement DNS dans le tableau de bord Cloudflare, puis le tunnel (`cloudflared tunnel delete <TUNNEL_NAME>`).
 
 ### Jouer en ligne
 
@@ -190,6 +192,7 @@ server/server.js  serveur Node : fichiers statiques et WebSocket
 Dockerfile        image du serveur (distroless, utilisateur sans privilège)
 docker-compose.yml conteneurs du jeu et du tunnel Cloudflare (verrouillés)
 scripts/web.sh    publication sur le web par Cloudflare Tunnel
+.env.example      modèle de configuration (adresse publique) ; copie locale .env hors Git
 js/clock.js       pendule d'échecs (cadences, incrément, temps écoulé)
 js/main.js        état du jeu, animations, interactions, interface, journal
 ```
@@ -201,9 +204,18 @@ Les navigateurs bloquent les modules JavaScript locaux quand la page est ouverte
 
 Pour ajouter un fichier, insérez son nom à la bonne place dans le tableau `FILES` de `index.html`.
 
+### Chargement à la demande
+
+Seul le nécessaire est téléchargé à l'ouverture :
+
+- **Thèmes de pièces** : seul le thème mémorisé (Dragons par défaut) est chargé ; les autres fichiers (`medieval.js`, `crystal.js`…) le sont au premier choix dans le sélecteur.
+- **Anticrénelage** : les modules de post-traitement de Three.js (FXAA, SMAA…) ne sont chargés que si l'on choisit un de ces modes.
+- **Musique** : un seul morceau est téléchargé à la fois, celui qui joue ; passer au suivant interrompt le téléchargement du précédent.
+- **Cache** : le serveur inscrit dans `index.html` une empreinte du code (`js/`, `css/`), ajoutée en `?v=…` à l'adresse de chaque fichier. Les fichiers restent en cache un an (navigateur et Cloudflare), et une mise à jour change leur adresse : jamais d'ancienne version. La page elle-même est revérifiée à chaque visite, le texte est compressé en gzip et les sons sont gardés une semaine. Ouvert depuis le disque, la dernière version est toujours relue.
+
 ## Ajouter un thème de pièces
 
-Dans un nouveau fichier chargé après `pieces.js`, appelez `registerTheme` :
+Créez `js/mon-theme.js` et déclarez-le dans `THEME_FILES` (`js/pieces.js`) : `'mon-theme': 'Mon thème'`. Il sera chargé à la demande. Dans ce fichier, appelez `registerTheme` :
 
 ```js
 registerTheme('mon-theme', {

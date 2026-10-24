@@ -8,9 +8,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Cinzel:wght@500;600&display=swap" rel="stylesheet" />
   <script>
-    // Anti-cache : chaque chargement récupère la dernière version du CSS et des scripts du jeu.
-    window.CACHE_BUST = Date.now().toString(36);
-    document.write(`<link rel="stylesheet" href="css/style.css?v=${CACHE_BUST}" />`);
+    // Version du code du jeu, inscrite ici par le serveur (empreinte des fichiers js/ et css/).
+    // Elle change à chaque mise à jour : les navigateurs et Cloudflare peuvent garder les fichiers
+    // en cache sans jamais servir une ancienne version. Ouvert depuis le disque (file://) : la
+    // dernière version est toujours relue.
+    const ASSET_VERSION = '__ASSET_VERSION__';
+    window.CACHE_BUST = /^[0-9a-f]{12}$/.test(ASSET_VERSION) ? `?v=${ASSET_VERSION}` : `?v=${Date.now().toString(36)}`;
+    document.write(`<link rel="stylesheet" href="css/style.css${CACHE_BUST}" />`);
   </script>
 </head>
 <body>
@@ -327,26 +331,22 @@
     import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
     import { Reflector } from 'three/addons/objects/Reflector.js';
     import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-    import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-    import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
-    import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-    Object.assign(window, { THREE, OrbitControls, RoomEnvironment, Reflector, BufferGeometryUtils,
-      EffectComposer, RenderPass, OutputPass, ShaderPass, SMAAPass, FXAAShader });
+    Object.assign(window, { THREE, OrbitControls, RoomEnvironment, Reflector, BufferGeometryUtils });
+    // Post-traitement (anticrénelage FXAA, SMAA…) et thèmes de pièces : chargés à la demande.
 
     // Les fichiers du jeu sont des scripts classiques (et non des modules) :
     // ainsi la page fonctionne aussi ouverte directement depuis le disque (file://).
-    const FILES = ['scene', 'antialias', 'boards', 'pieces', 'medieval', 'dragons', 'crystal', 'rules', 'notation', 'panels', 'sound', 'music', 'viewer', 'clock', 'endgame', 'online', 'main', 'debug'];
+    const FILES = ['scene', 'antialias', 'boards', 'pieces', 'rules', 'notation', 'panels', 'sound', 'music', 'viewer', 'clock', 'endgame', 'online', 'main', 'debug'];
     for (const name of FILES) {
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = `js/${name}.js?v=${window.CACHE_BUST}`; // anti-cache
+        s.src = `js/${name}.js${window.CACHE_BUST}`;
         s.onload = resolve;
         s.onerror = () => reject(new Error(`Impossible de charger js/${name}.js`));
         document.body.appendChild(s);
       });
+      // Seul le thème de pièces mémorisé est chargé au départ (les autres : au premier choix)
+      if (name === 'pieces') await loadTheme(startupTheme);
     }
   </script>
 </body>

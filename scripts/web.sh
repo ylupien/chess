@@ -8,17 +8,29 @@
 #
 # Ensuite, « docker compose up -d » suffit : le site est publié à chaque démarrage du projet.
 # Prérequis : cloudflared connecté au compte (« cloudflared tunnel login » → ~/.cloudflared/cert.pem).
+# Adresse publique : PUBLIC_HOSTNAME dans .env (modèle : .env.example).
 set -euo pipefail
 
-HOSTNAME_PUBLIC="${HOSTNAME_PUBLIC:-echecs.news-analytics.info}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Configuration locale (.env, hors Git). Une variable déjà définie dans l'environnement l'emporte.
+if [ -f "$ROOT/.env" ]; then
+  while IFS='=' read -r key value; do
+    [[ "$key" =~ ^[A-Z_]+$ ]] || continue
+    [ -n "${!key:-}" ] || export "$key=$value"
+  done < "$ROOT/.env"
+fi
+PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-}"
 TUNNEL_NAME="${TUNNEL_NAME:-echecs}"
 ORIGIN_CERT="${ORIGIN_CERT:-$HOME/.cloudflared/cert.pem}"
-
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+case "${1:-}" in publish|status)
+  [ -n "$PUBLIC_HOSTNAME" ] && [ "$PUBLIC_HOSTNAME" != echecs.example.com ] || {
+    printf '\033[31mErreur : adresse publique non configurée. Copiez .env.example en .env et renseignez PUBLIC_HOSTNAME.\033[0m\n' >&2; exit 1; } ;;
+esac
 DIR="$ROOT/deploy/cloudflared"
 CREDS="$DIR/credentials.json"
 CONFIG="$DIR/config.yml"
-URL="https://$HOSTNAME_PUBLIC"
+URL="https://$PUBLIC_HOSTNAME"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 die() { printf '\033[31mErreur : %s\033[0m\n' "$*" >&2; exit 1; }
@@ -53,11 +65,11 @@ publish() {
   fi
   chmod 600 "$CREDS"
 
-  # 2. Enregistrement DNS : echecs.news-analytics.info → tunnel (jamais écrasé s'il sert à autre chose)
-  say "DNS : $HOSTNAME_PUBLIC → tunnel…"
+  # 2. Enregistrement DNS : adresse publique → tunnel (jamais écrasé s'il sert à autre chose)
+  say "DNS : $PUBLIC_HOSTNAME → tunnel…"
   local out
-  if ! out="$(cf route dns "$TUNNEL_NAME" "$HOSTNAME_PUBLIC" 2>&1)"; then
-    die "impossible de créer le DNS de $HOSTNAME_PUBLIC (un enregistrement existe peut-être déjà pour autre chose) :
+  if ! out="$(cf route dns "$TUNNEL_NAME" "$PUBLIC_HOSTNAME" 2>&1)"; then
+    die "impossible de créer le DNS de $PUBLIC_HOSTNAME (un enregistrement existe peut-être déjà pour autre chose) :
 $out"
   fi
 
@@ -68,7 +80,7 @@ tunnel: $id
 credentials-file: /etc/cloudflared/credentials.json
 no-autoupdate: true
 ingress:
-  - hostname: $HOSTNAME_PUBLIC
+  - hostname: $PUBLIC_HOSTNAME
     service: http://chess:8080
   - service: http_status:404
 EOF

@@ -10,3 +10,5 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 *.log
+.env
+.env.*

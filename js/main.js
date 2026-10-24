@@ -960,18 +960,27 @@ makeDraggable(document.getElementById('chat'), 'chat');
 const themeSelect = document.getElementById('theme-select');
 function fillThemeSelect() {
   themeSelect.innerHTML = '';
-  for (const [id, t] of Object.entries(THEMES)) {
+  for (const id of THEME_IDS) {
     const o = document.createElement('option');
     o.value = id;
     const n = themeProgress(id);
-    o.textContent = n < 6 ? `${t.name} (${n}/6 pièces)` : t.name;
+    o.textContent = n < 6 ? `${themeName(id)} (${n}/6 pièces)` : themeName(id);
     themeSelect.appendChild(o);
   }
   themeSelect.value = currentTheme;
 }
 // remote : choix reçu de l'adversaire en ligne (appliqué, mais ni mémorisé ni renvoyé)
-function applyTheme(id, { remote = false } = {}) {
+// Un thème pas encore chargé est téléchargé d'abord (le dernier choix l'emporte).
+let themeRequest = 0;
+async function applyTheme(id, { remote = false } = {}) {
   if (id === currentTheme && themeSelect.value === id) return;
+  const req = ++themeRequest;
+  themeSelect.value = id;
+  document.body.classList.add('loading-theme');
+  const ok = await loadTheme(id);
+  if (req !== themeRequest) return;
+  document.body.classList.remove('loading-theme');
+  if (!ok) { themeSelect.value = currentTheme; return; }
   setPieceTheme(id);
   themeSelect.value = currentTheme;
   for (const p of pieces) setMesh(p);
@@ -981,10 +990,8 @@ function applyTheme(id, { remote = false } = {}) {
   Online.sendStyle(); // partie en ligne : l'adversaire voit les mêmes pièces
 }
 themeSelect.onchange = () => applyTheme(themeSelect.value);
-// Par défaut : pièces Dragons (sauf choix mémorisé)
-let savedTheme = null;
-try { savedTheme = localStorage.getItem('chess3d:theme'); } catch { }
-setPieceTheme(savedTheme || 'dragons');
+// Thème mémorisé (Dragons par défaut), déjà chargé par index.html avant ce script
+setPieceTheme(startupTheme);
 fillThemeSelect();
 
 // --- Plateau -------------------------------------------------------------------

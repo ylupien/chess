@@ -77,7 +77,7 @@ const Online = (() => {
         if (color === 'w') sendStyle(); // au départ, l'invité adopte les pièces et le plateau de l'hôte
         break;
       case 'style': // l'adversaire a changé de pièces ou de plateau
-        if (THEMES[msg.theme] && msg.theme !== currentTheme) applyTheme(msg.theme, { remote: true });
+        if (isTheme(msg.theme) && msg.theme !== currentTheme) applyTheme(msg.theme, { remote: true });
         if (BOARDS[msg.board] && msg.board !== currentBoard) applyBoard(msg.board, { remote: true });
         break;
       case 'move': {

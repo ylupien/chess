@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -43,10 +44,58 @@ const TYPES = {
 // Seuls ces dossiers et fichiers du projet sont publiés (pas server/, node_modules/, .git/…)
 const PUBLIC = ['index.html', 'js/', 'css/', 'sounds/', 'README.md'];
 
+// Fichiers texte compressés une fois, gardés en mémoire tant qu'ils ne changent pas
+const COMPRESSIBLE = /^(text\/|application\/(javascript|json))/;
+const gzipCache = new Map(); // fichier → { key, buf }
+function gzipped(file, st, cb) {
+  const key = `${st.size}-${st.mtimeMs}`;
+  const hit = gzipCache.get(file);
+  if (hit && hit.key === key) return cb(null, hit.buf);
+  fs.readFile(file, (err, data) => {
+    if (err) return cb(err);
+    zlib.gzip(data, { level: 9 }, (err, buf) => {
+      if (err) return cb(err);
+      gzipCache.set(file, { key, buf });
+      cb(null, buf);
+    });
+  });
+}
+
+// Version du code du jeu : empreinte des tailles et dates des fichiers de js/ et css/.
+// Inscrite dans index.html, elle est ajoutée (?v=…) à l'adresse de chaque script et feuille de style.
+function assetVersion() {
+  const h = crypto.createHash('sha1');
+  for (const dir of ['js', 'css']) {
+    for (const name of fs.readdirSync(path.join(ROOT, dir)).sort()) {
+      const st = fs.statSync(path.join(ROOT, dir, name));
+      h.update(`${dir}/${name}:${st.size}:${st.mtimeMs};`);
+    }
+  }
+  return h.digest('hex').slice(0, 12);
+}
+
+// index.html avec la version du code inscrite ; jamais mis en cache sans vérification
+function serveIndex(req, res) {
+  fs.readFile(path.join(ROOT, 'index.html'), 'utf8', (err, html) => {
+    if (err) return send(res, 500, 'Erreur');
+    const body = Buffer.from(html.replace("'__ASSET_VERSION__'", `'${assetVersion()}'`));
+    const etag = `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"`;
+    const headers = { ...SECURITY_HEADERS, 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache', 'ETag': etag, 'Vary': 'Accept-Encoding' };
+    if ((req.headers['if-none-match'] || '').split(',').some(t => t.trim().replace(/^W\//, '') === etag)) {
+      res.writeHead(304, headers);
+      return res.end();
+    }
+    const gz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+    const out = gz ? zlib.gzipSync(body) : body;
+    res.writeHead(200, { ...headers, ...(gz && { 'Content-Encoding': 'gzip' }), 'Content-Length': out.length });
+    res.end(req.method === 'HEAD' ? undefined : out);
+  });
+}
+
 function serveStatic(req, res) {
   let urlPath;
   try { urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { return send(res, 400, 'Requête invalide'); }
-  if (urlPath === '/') urlPath = '/index.html';
+  if (urlPath === '/' || urlPath === '/index.html') return serveIndex(req, res);
   const rel = urlPath.replace(/^\/+/, '');
   const file = path.resolve(ROOT, rel);
   // Protection : le fichier doit rester dans le projet et dans un emplacement public
@@ -56,7 +105,27 @@ function serveStatic(req, res) {
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return send(res, 404, 'Introuvable');
     const type = TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream';
-    const headers = { ...SECURITY_HEADERS, 'Content-Type': type, 'Cache-Control': 'no-cache', 'Accept-Ranges': 'bytes' };
+    const etag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
+    // Cache : un script ou une feuille de style demandé avec sa version (?v=…) ne change jamais
+    // à cette adresse, il est gardé un an ; les sons, une semaine ; le reste est revérifié.
+    const versioned = /^(js|css)\//.test(rel) && /[?&]v=/.test(req.url);
+    const cache = versioned ? 'public, max-age=31536000, immutable'
+      : rel.startsWith('sounds/') && !rel.endsWith('.html') ? 'public, max-age=604800' : 'no-cache';
+    const headers = { ...SECURITY_HEADERS, 'Content-Type': type, 'Cache-Control': cache, 'ETag': etag, 'Last-Modified': st.mtime.toUTCString(), 'Accept-Ranges': 'bytes' };
+    const inm = req.headers['if-none-match'];
+    if (inm ? inm.split(',').some(t => t.trim().replace(/^W\//, '') === etag)
+            : req.headers['if-modified-since'] && Math.floor(st.mtimeMs / 1000) <= Date.parse(req.headers['if-modified-since']) / 1000) {
+      res.writeHead(304, headers);
+      return res.end();
+    }
+    // Texte (HTML, JS, CSS…) compressé : moins de données à envoyer depuis la maison
+    if (COMPRESSIBLE.test(type) && /\bgzip\b/.test(req.headers['accept-encoding'] || '') && !req.headers.range) {
+      return gzipped(file, st, (err, buf) => {
+        if (err) return send(res, 500, 'Erreur');
+        res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding', 'Content-Length': buf.length });
+        res.end(req.method === 'HEAD' ? undefined : buf);
+      });
+    }
     // Requêtes partielles (lecture et avance rapide des fichiers audio)
     const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
     if (range) {

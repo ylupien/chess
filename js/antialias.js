@@ -1,7 +1,7 @@
 // Anticrénelage : plusieurs modes au choix, appliqués au rendu de la scène principale.
-// Script classique (chargé par index.html dans l'ordre). Dépend de : THREE, scene.js et des
-// modules de post-traitement Three.js (EffectComposer, RenderPass, OutputPass, ShaderPass,
-// FXAAShader, SMAAPass) exposés sur window par index.html.
+// Script classique (chargé par index.html dans l'ordre). Dépend de : THREE, scene.js.
+// Les modules de post-traitement de Three.js ne sont téléchargés qu'au premier choix d'un mode
+// qui en a besoin (le mode par défaut, « Natif », n'en utilise aucun).
 //
 // « Natif » rend directement à l'écran (lissage MSAA du navigateur). Les autres modes passent
 // par une chaîne de post-traitement : la scène est rendue dans une image intermédiaire, puis
@@ -21,6 +21,18 @@ const AA = (() => {
   let mode = 'native';
   let composer = null, fxaaPass = null;
 
+  // Modules chargés à la demande, par groupe (résolus par l'importmap d'index.html)
+  const ADDONS = {
+    base: ['postprocessing/EffectComposer.js', 'postprocessing/RenderPass.js', 'postprocessing/OutputPass.js'],
+    fxaa: ['postprocessing/ShaderPass.js', 'shaders/FXAAShader.js'],
+    smaa: ['postprocessing/SMAAPass.js'],
+  };
+  const lib = {}, loading = {};
+  const load = group => loading[group] ??= Promise.all(ADDONS[group].map(f => import('three/addons/' + f)))
+    .then(mods => mods.forEach(m => Object.assign(lib, m)))
+    .catch(err => { delete loading[group]; throw err; });
+  let request = 0; // le dernier mode choisi l'emporte
+
   const size = () => [window.innerWidth, window.innerHeight];
 
   function disposeComposer() {
@@ -36,6 +48,7 @@ const AA = (() => {
     const [w, h] = size();
     const samples = Math.min(MODES[m].samples || 0, renderer.capabilities.maxSamples);
     const target = new THREE.WebGLRenderTarget(w * BASE_RATIO, h * BASE_RATIO, { type: THREE.HalfFloatType, samples });
+    const { EffectComposer, RenderPass, OutputPass, ShaderPass, FXAAShader, SMAAPass } = lib;
     composer = new EffectComposer(renderer, target);
     composer.setPixelRatio(BASE_RATIO);
     composer.setSize(w, h);
@@ -59,10 +72,17 @@ const AA = (() => {
   function setMode(m) {
     if (!MODES[m]) m = 'native';
     mode = m;
+    const req = ++request;
     disposeComposer();
     renderer.setPixelRatio(BASE_RATIO * (MODES[m].scale || 1));
     renderer.setSize(...size());
-    if (m !== 'native' && m !== 'ssaa2') buildComposer(m);
+    if (m !== 'native' && m !== 'ssaa2') {
+      // Rendu direct le temps du téléchargement, puis chaîne de post-traitement
+      const groups = ['base', ...(ADDONS[m] ? [m] : [])];
+      Promise.all(groups.map(load))
+        .then(() => { if (req === request) buildComposer(m); })
+        .catch(err => console.error('Anticrénelage : modules introuvables', err));
+    }
     try { localStorage.setItem('chess3d:aa', m); } catch { }
     return mode;
   }

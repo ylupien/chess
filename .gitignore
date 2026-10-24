@@ -4,5 +4,8 @@
 Thumbs.db
 node_modules/
 
+# Configuration locale (adresse publique…) — modèle versionné : .env.example
+.env
+
 # Identifiants du tunnel Cloudflare (générés par scripts/web.sh)
 deploy/cloudflared/
