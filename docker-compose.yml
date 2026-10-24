@@ -20,6 +20,7 @@ services:
       TRUST_PROXY: "cloudflare"     # limites par adresse : adresse réelle via CF-Connecting-IP
       MAX_ROOMS: "500"
       MAX_CONN_PER_IP: "10"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}" # page /admin (lu dans .env ; vide = désactivée)
     # --- Isolation vis-à-vis du système hôte ---
     user: "65532:65532"             # utilisateur sans privilège
     read_only: true                 # système de fichiers en lecture seule

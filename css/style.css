@@ -210,6 +210,17 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
   border-radius: 20px; background: var(--panel); backdrop-filter: blur(6px); border: 1px solid rgba(201,162,94,.4);
   font-size: 13px; white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; }
 #online-banner.warn { border-color: var(--danger); color: #ffb4a8; }
+/* Spectateur : choix de la caméra (vue libre ou celle d'un joueur) */
+#watch-cam { position: fixed; top: 104px; left: 50%; transform: translateX(-50%); z-index: 940;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 32px);
+  padding: 6px 8px 6px 14px; border-radius: 12px; background: var(--panel); backdrop-filter: blur(6px);
+  border: 1px solid rgba(201,162,94,.25); font-size: 12.5px; }
+#watch-cam .wc-label { font: 600 11px "Cinzel", Georgia, serif; letter-spacing: .12em; text-transform: uppercase; opacity: .7; }
+#watch-cam .seg button { border: 0; border-radius: 0; padding: 5px 10px; font-size: 12.5px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#watch-cam .seg button.active { background: rgba(201,162,94,.22); color: #f3dc9c; }
+#watch-cam .seg button:disabled { opacity: .4; cursor: default; }
+#watch-cam .wc-show { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; opacity: .85; white-space: nowrap; }
+#watch-cam .wc-show input { accent-color: var(--accent); margin: 0; }
 .splash-secondary { margin-top: 14px; font-size: 13px; padding: 7px 18px; border-radius: 20px; opacity: .8; }
 
 /* Messagerie */

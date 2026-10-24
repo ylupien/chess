@@ -12,3 +12,5 @@ docker-compose.yml
 *.log
 .env
 .env.*
+deploy
+admin/dist

@@ -16,12 +16,24 @@ Une connexion Internet est requise au premier chargement : Three.js (v0.160.0) e
 
 ## Serveur et parties en ligne
 
-Pour jouer à deux sur deux appareils, lancez le serveur Node.js (Node 18 ou plus) :
+Pour jouer à deux sur deux appareils, lancez le serveur Node.js (Node 22.9 ou plus) :
 
 ```
-npm install     # une seule fois
-npm start       # http://localhost:8080   (autre port : PORT=3000 npm start)
+npm install            # une seule fois
+npm run build:admin    # compile la page d'administration (Svelte), si vous l'utilisez
+npm start              # http://localhost:8080   (autre port : PORT=3000 npm start ; lit .env)
 ```
+
+### Développement (recompilation automatique)
+
+```
+npm run dev
+```
+
+- **Jeu** : http://localhost:8090. Le serveur redémarre seul quand un fichier de `server/` change.
+- **Administration** : http://localhost:5173/admin/, servie par Vite. Chaque modification de `admin/src` s'affiche aussitôt, sans recharger la page.
+- Vite transmet l'API, le WebSocket et le jeu au serveur de jeu, et les variables de `.env` sont chargées.
+- Le port 8090 évite le conflit avec le conteneur Docker, qui occupe le 8080. Pour un autre port : `DEV_PORT=…`.
 
 Le serveur (`server/server.js`) sert les fichiers du jeu et un WebSocket (`/ws`) pour les parties en ligne.
 Seuls `index.html`, `js/`, `css/`, `sounds/` et `README.md` sont publiés.
@@ -62,6 +74,7 @@ Variables d'environnement :
 | `TRUST_PROXY=1` | Lit l'adresse du visiteur dans `X-Forwarded-For`, pour un autre proxy (Caddy, nginx…). |
 | `MAX_ROOMS` | Nombre maximal de salles ouvertes. |
 | `MAX_CONN_PER_IP` | Nombre maximal de connexions par adresse. |
+| `ADMIN_PASSWORD` | Mot de passe de la page d'administration (12 caractères au moins). Vide : administration désactivée. Lu dans `.env`. |
 
 ### Publier sur le web (Cloudflare Tunnel)
 
@@ -101,6 +114,37 @@ Pendant une partie en ligne, chacun ne joue que ses pièces, à son tour. Le pla
 - **Pièces et plateau partagés** : au départ, l'invité adopte les choix de l'hôte ; ensuite, un changement de pièces ou de plateau par l'un s'applique chez l'autre. Les préférences mémorisées de chacun ne sont pas écrasées.
 - **Pendule partagée** : le serveur fait foi (temps écoulé, incrément, chute du drapeau au même instant pour les deux). La cadence est choisie par le joueur 1 ; pas de pause en ligne.
 - **💬 Messagerie** (barre de menu, visible quand les deux joueurs sont connectés) : discussion entre les joueurs, avec un compteur de messages non lus. Un message reçu panneau fermé fait pulser le bouton (deux fois), et la notification revient toutes les 30 secondes tant qu'il n'est pas lu.
+
+### Administration
+
+La page **`/admin/`** (par exemple http://localhost:8080/admin/) est protégée par le mot de passe `ADMIN_PASSWORD` de `.env`. Elle montre en temps réel :
+
+- **Statistiques** : connexions (et pic), parties en ligne, parties solo, salles en attente, spectateurs, durée de fonctionnement et mémoire du serveur.
+- **Parties** :
+  - état (en attente, invité connecté, en cours, abandonnée) et joueurs, avec leur connexion ;
+  - pendules qui tournent en direct, nombre de coups et dernier coup, durée, pièces et plateau ;
+  - un **mini-échiquier** de la position actuelle ;
+  - les **parties solo** aussi : un joueur seul sur le jeu servi par le serveur envoie sa position à chaque changement (placement libre et annulations compris). Les parties ouvertes depuis le disque (`file://`) restent invisibles.
+- **Connexions** : rôle, nom, partie, adresse, navigateur, durée et nombre de messages.
+
+**Cliquer sur une partie** (ou sur une connexion liée à une partie) ouvre le jeu en **mode spectateur** dans un nouvel onglet :
+
+- la position actuelle est reconstituée, puis chaque coup, la pendule et les changements de pièces arrivent en direct ;
+- le spectateur ne peut rien jouer ;
+- **caméra** : la barre « Caméra » propose *Vue libre* ou la vue exacte de chaque joueur (♔ Blancs, ♚ Noirs, ou *Joueur* en solo), suivie en douceur. *Montrer les caméras* affiche dans la scène l'emplacement de chaque caméra (ivoire, noire) et la direction de son regard. Les joueurs n'envoient leur caméra que lorsque quelqu'un regarde ;
+- les joueurs voient « 👁 1 spectateur » dans leur bandeau (en solo : « 1 spectateur regarde votre partie ») ;
+- la messagerie reste privée entre les joueurs.
+
+Sécurité :
+
+- Comparaison du mot de passe en temps constant. Après 5 échecs, l'adresse est bloquée 15 minutes.
+- Session aléatoire dans un cookie `HttpOnly`, `SameSite=Strict`, `Secure` en HTTPS, valable 12 heures.
+- Requêtes et WebSocket acceptés seulement depuis la page elle-même (même origine).
+- La page n'autorise aucun script externe (`Content-Security-Policy`).
+- Le mode spectateur exige une session d'administration ouverte.
+- Sans `ADMIN_PASSWORD`, toutes les adresses `/admin` répondent 404.
+
+La page est écrite en **Svelte 5** (`admin/src`) et compilée par **Vite** dans `admin/dist`, hors Git. L'image Docker la compile elle-même, et l'image finale ne contient ni Svelte ni Vite.
 
 ## Fonctionnalités
 
@@ -189,6 +233,9 @@ js/debug.js       panneau Debug et barre de menu des panneaux
 js/online.js      parties en ligne (WebSocket)
 js/endgame.js     fin de partie (encart, caméra vers le roi gagnant)
 server/server.js  serveur Node : fichiers statiques et WebSocket
+server/admin.js   administration : mot de passe, sessions, flux en temps réel
+admin/            page d'administration (Svelte 5 + Vite) ; compilée dans admin/dist
+scripts/dev.mjs   mode développement (serveur relancé à chaque modification + Vite en direct)
 Dockerfile        image du serveur (distroless, utilisateur sans privilège)
 docker-compose.yml conteneurs du jeu et du tunnel Cloudflare (verrouillés)
 scripts/web.sh    publication sur le web par Cloudflare Tunnel

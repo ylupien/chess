@@ -9,3 +9,6 @@ node_modules/
 
 # Identifiants du tunnel Cloudflare (générés par scripts/web.sh)
 deploy/cloudflared/
+
+# Page d'administration compilée (npm run build:admin)
+admin/dist/

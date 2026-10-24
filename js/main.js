@@ -89,6 +89,7 @@ function resetGame({ fromOnline = false } = {}) {
   if (resetting || busy) return;
   // En ligne : on ne se déconnecte pas, on propose la nouvelle partie au second joueur
   if (Online.active && !fromOnline) { Online.requestNewGame(); return; }
+  if (Online.watching && !fromOnline) return; // spectateur : la partie appartient aux joueurs
   if (pieces.length !== 32) { newGame(); return; }
   resetting = true;
   forcedResult = null;
@@ -183,6 +184,7 @@ function resetGame({ fromOnline = false } = {}) {
 // En ligne, la simulation passe par le serveur pour s'appliquer aux deux joueurs à la fois.
 function simulateEnd(winner, reason, { fromOnline = false } = {}) {
   if (Online.active && !fromOnline) { Online.sendSimulate(winner, reason); return; }
+  if (Online.watching && !fromOnline) return;
   if (resetting) return;
   if (mode !== 'rules') setMode('rules');
   forcedResult = { winner, reason };
@@ -219,6 +221,41 @@ function sendToReserve(p) {
   if (p.sq >= 0 && board[p.sq] === p) board[p.sq] = null;
   p.sq = -1;
   p.capturedAt = ++captureCounter;
+}
+
+// Spectateur qui arrive en cours de partie : les coups déjà joués sont appliqués d'un coup,
+// sans animation ni son (même enchaînement de règles que pendant la partie).
+function replayMoves(list) {
+  newGame();
+  for (const mv of list) {
+    const m = legalMovesFrom(position(), mv.from, epSquare).find(x => x.to === mv.to);
+    if (!m) break;
+    playMove(m, { remote: true, promo: mv.promo || 'q' }); // sans promotion à choisir : immédiat
+  }
+  tweens.clear();
+  for (const p of pieces) p.landingSounds = null;
+  layout(false);
+  refresh();
+}
+
+// Spectateur d'une partie solo : la position reçue est appliquée telle quelle (placement libre
+// compris). instant : à l'arrivée, sans animation ; ensuite, les pièces se déplacent normalement.
+function applyRemoteState(st, instant = false) {
+  if (pieces.length !== 32) newGame();
+  if (st.mode !== mode) { mode = st.mode; Clock.setFrozen(mode === 'free'); }
+  const before = pieces.map(p => p.sq);
+  log = st.log.map(e => ({ ...e }));
+  restore({ ...st, logLength: log.length });
+  history = []; // pas d'annulation pour le spectateur
+  if (instant) { tweens.clear(); layout(false); }
+  else pieces.forEach((p, i) => { if (p.sq !== before[i]) p.landingSounds = [p.sq < 0 ? 'remove' : 'move']; });
+  refresh();
+}
+
+// État de la partie solo, transmis au serveur (visible dans l'administration)
+function soloState() {
+  return { ...snapshot(), log: log.slice(-50), plies: log.filter(e => e.kind === 'move').length,
+    mode, theme: currentTheme, board: currentBoard };
 }
 
 // --- Jouer un coup (mode partie) --------------------------------------
@@ -513,6 +550,7 @@ function refreshHighlights() {
 // =====================================================================
 function canPick(p) {
   if (busy || resetting) return false;
+  if (Online.watching) return false; // spectateur : on regarde sans toucher
   if (mode === 'free') return true;
   if (Online.active && p.white !== Online.isWhite) return false; // en ligne : uniquement ses pièces
   return !gameOver && p.sq >= 0 && p.white === whiteToMove();
@@ -763,9 +801,10 @@ function refresh() {
     ? 'Cliquez ou glissez une pièce : seuls les coups légaux sont acceptés (roque, prise en passant et promotion compris).'
     : 'Glissez n\'importe quelle pièce où vous voulez : déposée sur une autre pièce, celle-ci sort du jeu. Déposez-la hors du plateau pour la retirer, ou reprenez-la depuis la réserve.';
 
-  btnUndo.disabled = history.length === 0 || Online.active; // pas d'annulation en ligne
-  btnFree.disabled = Online.active;
+  btnUndo.disabled = history.length === 0 || Online.active || Online.watching; // pas d'annulation en ligne
+  btnFree.disabled = Online.active || Online.watching;
   Online.updateBanner();
+  Online.soloChanged(); // partie solo : l'administration voit la position
   btnRules.classList.toggle('active', mode === 'rules');
   btnFree.classList.toggle('active', mode === 'free');
   renderLog();
@@ -788,7 +827,7 @@ Clock.onFlag = flag => {
 
 function setMode(m) {
   if (mode === m) return;
-  if (Online.active && m === 'free') return; // pas de placement libre en partie en ligne
+  if ((Online.active || Online.watching) && m === 'free') return; // pas de placement libre en partie en ligne
   mode = m;
   Clock.setFrozen(m === 'free');
   clearSelection();
@@ -797,7 +836,7 @@ function setMode(m) {
 
 btnRules.onclick = () => setMode('rules');
 btnFree.onclick = () => setMode('free');
-btnUndo.onclick = () => { if (history.length && !busy) { restore(history.pop()); Sound.play('undo'); } };
+btnUndo.onclick = () => { if (history.length && !busy && !Online.watching) { restore(history.pop()); Sound.play('undo'); } };
 document.getElementById('btn-reset').onclick = () => resetGame();
 document.getElementById('btn-online').onclick = () => Online.startHost(); // les pièces retournent à leur case en volant
 
@@ -1014,6 +1053,7 @@ try { savedBoard = localStorage.getItem('chess3d:board'); } catch { }
 applyBoard(savedBoard || 'glass'); // par défaut : plateau Verre noir
 
 newGame();
+Online.ready(); // spectateur : la partie regardée est chargée maintenant
 
 // Écran d'ouverture : le bouton « Jouer » s'active quand la scène est prête (premières
 // images rendues). Ce clic est le premier geste de l'utilisateur : il débloque la musique
@@ -1023,13 +1063,14 @@ requestAnimationFrame(() => requestAnimationFrame(() => {
   const btn = document.getElementById('btn-start');
   if (!fade || !btn) return;
   btn.disabled = false;
-  btn.textContent = 'Jouer';
+  btn.textContent = Online.watchLink ? 'Regarder' : 'Jouer'; // spectateur (lien de l'administration)
   btn.focus();
   let first = true;
-  const enter = after => {
+  const enter = (after, { quick = false } = {}) => {
     onHome = false; // la rotation reprend, en douceur
+    Online.soloChanged(); // partie solo : visible dans l'administration dès maintenant
     Music.start();
-    fade.classList.remove('quick');
+    fade.classList.toggle('quick', quick); // fondu court (spectateur)
     fade.classList.add('done');
     after?.();
     first = false;
@@ -1041,6 +1082,9 @@ requestAnimationFrame(() => requestAnimationFrame(() => {
   const onlineBtn = document.getElementById('btn-start-online');
   const showOnline = () => onlineBtn.classList.toggle('hidden', !(Online.served && !Online.invited && !Online.active));
   showOnline();
+  // Spectateur (lien « Regarder » de l'administration) : pas d'écran d'accueil, la partie
+  // apparaît aussitôt. La musique démarrera au premier clic si le navigateur la bloque.
+  if (Online.watchLink) enter(() => Online.afterSplash(), { quick: true });
   onlineBtn.onclick = () => enter(() => Online.startHost());
 
   // Bouton Accueil : confirmation, puis retour à l'écran d'ouverture.
@@ -1048,7 +1092,7 @@ requestAnimationFrame(() => requestAnimationFrame(() => {
   const confirmEl = document.getElementById('confirm-home');
   const goHome = () => {
     confirmEl.classList.add('hidden');
-    if (Online.active) Online.leave(); // l'adversaire est prévenu
+    if (Online.active || Online.watching) Online.leave(); // l'adversaire est prévenu
     onHome = true;
     forcedResult = null;
     EndGame.hide();
@@ -1062,7 +1106,9 @@ requestAnimationFrame(() => requestAnimationFrame(() => {
     setTimeout(() => btn.focus(), 50);
   };
   document.getElementById('btn-home').onclick = () => {
-    document.getElementById('confirm-home-text').textContent = Online.active
+    document.getElementById('confirm-home-text').textContent = Online.watching
+      ? 'Vous cesserez de regarder cette partie et reviendrez à l\'écran d\'accueil.'
+      : Online.active
       ? 'Vous quitterez la partie en ligne (votre adversaire en sera informé) et reviendrez à l\'écran d\'accueil.'
       : 'Vous reviendrez à l\'écran d\'accueil. « Jouer » y démarre une nouvelle partie.';
     confirmEl.classList.remove('hidden');
@@ -1101,6 +1147,7 @@ renderer.setAnimationLoop(now => {
   }
   updateJelly(dt);
   CameraFly.update(now);
+  Online.frame(dt); // spectateur : vue d'un joueur
   updateAutoRotate(dt);
   renderer.info.reset(); // compteurs d'une image complète (miroir et ombres compris), pour le panneau Debug
   controls.update();
