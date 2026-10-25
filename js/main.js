@@ -27,6 +27,7 @@ let gameStartTime = 0;      // horodatage du premier coup (durée affichée en f
 let selected = null;
 let targets = [];                      // coups légaux de la pièce sélectionnée (mode partie)
 let hoverSq = -1;
+let classicHeld = false; // bouton « Classique » maintenu
 
 const whiteToMove = () => turn === 'w';
 const position = () => board.map(p => p ? { t: p.type, w: p.white, moved: p.moved } : null);
@@ -36,8 +37,9 @@ function setMesh(p) {
   // échelle verticale s et sa vitesse sv, hauteur de soulèvement.
   p.fx ??= { tx: 0, tz: 0, wx: 0, wz: 0, s: 1, sv: 0, lift: 0, prev: null };
   const old = p.mesh;
-  p.mesh = buildMesh(p.type, p.white);
+  p.mesh = buildMesh(p.type, p.white, p.side);
   p.mesh.userData.piece = p;
+  if (classicHeld) setClassicView(p.mesh, true);
   if (old) {
     p.mesh.position.copy(old.position);
     piecesGroup.remove(old);
@@ -55,7 +57,7 @@ function newGame() {
   board.fill(null);
   const BACK = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
   const add = (type, white, sq) => {
-    const p = { type, white, sq, moved: false, capturedAt: 0, mesh: null };
+    const p = { type, white, sq, side: (sq & 7) >= 4 ? 1 : 0, moved: false, capturedAt: 0, mesh: null };
     setMesh(p);
     pieces.push(p);
     board[sq] = p;
@@ -255,7 +257,7 @@ function applyRemoteState(st, instant = false) {
 // État de la partie solo, transmis au serveur (visible dans l'administration)
 function soloState() {
   return { ...snapshot(), log: log.slice(-50), plies: log.filter(e => e.kind === 'move').length,
-    mode, theme: currentTheme, board: currentBoard };
+    mode, theme: themeStyle(), board: currentBoard };
 }
 
 // --- Jouer un coup (mode partie) --------------------------------------
@@ -668,15 +670,65 @@ window.addEventListener('pointerdown', e => {
   clearSelection();
 }, true);
 
+// --- Fantôme classique : au survol, la pièce classique en transparence ---------------------
+let ghostOn = false;
+try { ghostOn = localStorage.getItem('chess3d:ghost') === '1'; } catch { }
+const ghost = { piece: null, mesh: null, obj: null }; // mesh : la pièce est reconstruite au changement de thème
+function showGhost(p) {
+  if (!ghostOn || classicHeld) p = null;
+  if (ghost.piece === p && ghost.mesh === p?.mesh) return;
+  ghost.obj?.removeFromParent();
+  Object.assign(ghost, { piece: p, mesh: p?.mesh, obj: null });
+  if (!p) return;
+  ghost.obj = buildGhost(p.type, p.white, p.side);
+  if (ghost.obj) p.mesh.userData.wobble.add(ghost.obj); // suit la pièce et son effet « gelée »
+}
+const ghostToggle = document.getElementById('ghost-toggle');
+ghostToggle.checked = ghostOn;
+ghostToggle.onchange = () => {
+  ghostOn = ghostToggle.checked;
+  try { localStorage.setItem('chess3d:ghost', ghostOn ? '1' : '0'); } catch { }
+  if (!ghostOn) showGhost(null);
+};
+renderer.domElement.addEventListener('pointerleave', () => showGhost(null));
+
+// --- Bouton « Classique » : tant qu'il est appuyé, toutes les pièces en Classique ------------
+const classicBtn = document.getElementById('btn-classic');
+function holdClassic(on) {
+  if (on === classicHeld) return;
+  classicHeld = on;
+  classicBtn.classList.toggle('held', on);
+  if (on) showGhost(null);
+  for (const p of pieces) if (p.mesh) setClassicView(p.mesh, on);
+}
+// Inutile quand toutes les pièces ont déjà l'allure classique (thèmes Classique, Cristal)
+function updateClassicBtn() {
+  const useful = [true, false].some(white => [...'prnbqk'].some(t => [0, 1].some(side => !hasClassicLook(t, white, side))));
+  if (!useful) holdClassic(false);
+  classicBtn.classList.toggle('hidden', !useful);
+}
+classicBtn.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  classicBtn.setPointerCapture(e.pointerId); // relâché hors du bouton : on revient quand même
+  holdClassic(true);
+});
+for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) classicBtn.addEventListener(ev, () => holdClassic(false));
+classicBtn.addEventListener('keydown', e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); holdClassic(true); } });
+classicBtn.addEventListener('keyup', e => { if (e.key === ' ' || e.key === 'Enter') holdClassic(false); });
+classicBtn.addEventListener('blur', () => holdClassic(false));
+addEventListener('blur', () => holdClassic(false));
+
 window.addEventListener('pointermove', e => {
   if (!drag) {
     if (e.target === renderer.domElement && !busy && e.buttons === 0) {
       aim(e);
       const p = pickPiece();
       renderer.domElement.style.cursor = p && canPick(p) ? 'grab' : '';
-    }
+      showGhost(p);
+    } else showGhost(null);
     return;
   }
+  showGhost(null);
   if (!drag.active) {
     if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
     drag.active = true;
@@ -996,42 +1048,71 @@ makeDraggable(document.getElementById('chat'), 'chat');
 
 // --- Démarrage et boucle ----------------------------------------------
 // --- Thème des pièces --------------------------------------------------------
-const themeSelect = document.getElementById('theme-select');
+// Un sélecteur par camp : les thèmes se mélangent librement
+const themeSelects = { w: document.getElementById('theme-select'), b: document.getElementById('theme-select-b') };
 function fillThemeSelect() {
-  themeSelect.innerHTML = '';
-  for (const id of THEME_IDS) {
-    const o = document.createElement('option');
-    o.value = id;
-    const n = themeProgress(id);
-    o.textContent = n < 6 ? `${themeName(id)} (${n}/6 pièces)` : themeName(id);
-    themeSelect.appendChild(o);
+  for (const [c, sel] of Object.entries(themeSelects)) {
+    sel.innerHTML = '';
+    for (const id of THEME_IDS) {
+      const o = document.createElement('option');
+      o.value = id;
+      const n = themeProgress(id);
+      o.textContent = n < 6 ? `${themeName(id)} (${n}/6 pièces)` : themeName(id);
+      sel.appendChild(o);
+    }
+    sel.value = pieceThemes[c];
   }
-  themeSelect.value = currentTheme;
 }
-// remote : choix reçu de l'adversaire en ligne (appliqué, mais ni mémorisé ni renvoyé)
-// Un thème pas encore chargé est téléchargé d'abord (le dernier choix l'emporte).
+// want : { w, b } (un camp absent garde son thème). remote : choix reçu de l'adversaire en ligne
+// (appliqué, mais ni mémorisé ni renvoyé). Un thème pas encore chargé est téléchargé d'abord ;
+// le dernier choix l'emporte.
 let themeRequest = 0;
-async function applyTheme(id, { remote = false } = {}) {
-  if (id === currentTheme && themeSelect.value === id) return;
+async function applyThemes(want, { remote = false } = {}) {
+  const next = { w: want.w || pieceThemes.w, b: want.b || pieceThemes.b };
+  if (next.w === pieceThemes.w && next.b === pieceThemes.b) { fillThemeSelect(); return; }
   const req = ++themeRequest;
-  themeSelect.value = id;
+  themeSelects.w.value = next.w; themeSelects.b.value = next.b;
   document.body.classList.add('loading-theme');
-  const ok = await loadTheme(id);
+  const ok = (await Promise.all([loadTheme(next.w), loadTheme(next.b)])).every(Boolean);
   if (req !== themeRequest) return;
   document.body.classList.remove('loading-theme');
-  if (!ok) { themeSelect.value = currentTheme; return; }
-  setPieceTheme(id);
-  themeSelect.value = currentTheme;
-  for (const p of pieces) setMesh(p);
+  if (!ok) { fillThemeSelect(); return; }
+  const changed = { w: next.w !== pieceThemes.w, b: next.b !== pieceThemes.b };
+  setPieceTheme(next.w, 'w'); setPieceTheme(next.b, 'b');
+  fillThemeSelect(); // nombre de pièces déjà modélisées, connu une fois le thème chargé
+  for (const p of pieces) if (changed[p.white ? 'w' : 'b']) setMesh(p);
+  updateClassicBtn();
   layout(true); // reprend les déplacements en cours avec les nouveaux modèles
   if (remote) return;
-  try { localStorage.setItem('chess3d:theme', currentTheme); } catch { }
+  try { localStorage.setItem('chess3d:theme', pieceThemes.w); localStorage.setItem('chess3d:theme-b', pieceThemes.b); } catch { }
   Online.sendStyle(); // partie en ligne : l'adversaire voit les mêmes pièces
 }
-themeSelect.onchange = () => applyTheme(themeSelect.value);
-// Thème mémorisé (Dragons par défaut), déjà chargé par index.html avant ce script
-setPieceTheme(startupTheme);
+// Bouton de liaison : lié, un choix s'applique aux deux camps
+const themeLink = document.getElementById('theme-link');
+let themesLinked = (() => {
+  try { const v = localStorage.getItem('chess3d:theme-link'); if (v !== null) return v === '1'; } catch { }
+  return startupThemes.w === startupThemes.b;
+})();
+function showThemeLink() {
+  themeLink.setAttribute('aria-pressed', String(themesLinked));
+  themeLink.title = themesLinked ? 'Camps liés : un choix s\'applique aux deux (cliquer pour délier)'
+    : 'Camps séparés : chaque camp a son thème (cliquer pour lier)';
+}
+themeLink.onclick = () => {
+  themesLinked = !themesLinked;
+  showThemeLink();
+  try { localStorage.setItem('chess3d:theme-link', themesLinked ? '1' : '0'); } catch { }
+  if (themesLinked) applyThemes({ b: pieceThemes.w }); // on relie : les Noirs prennent le thème des Blancs
+};
+showThemeLink();
+const pickTheme = c => { const id = themeSelects[c].value; applyThemes(themesLinked ? { w: id, b: id } : { [c]: id }); };
+themeSelects.w.onchange = () => pickTheme('w');
+themeSelects.b.onchange = () => pickTheme('b');
+// Thèmes mémorisés (Dragons par défaut), déjà chargés par index.html avant ce script
+setPieceTheme(startupThemes.w, 'w');
+setPieceTheme(startupThemes.b, 'b');
 fillThemeSelect();
+updateClassicBtn();
 
 // --- Plateau -------------------------------------------------------------------
 const boardSelect = document.getElementById('board-select');

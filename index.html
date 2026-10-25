@@ -76,14 +76,17 @@
       }
     }, 12000);
   </script>
-  <nav id="menubar" aria-label="Panneaux">
+  <nav id="homebar" aria-label="Accueil">
     <button id="btn-home" title="Revenir à l'écran d'accueil"><svg class="logo-mini" aria-hidden="true"><use href="#logo-king" /></svg>Accueil</button>
+  </nav>
+  <nav id="menubar" aria-label="Panneaux">
     <button data-panel="ui" title="Afficher / masquer le panneau de contrôle">🎛 Contrôles</button>
     <button data-panel="gfx" title="Afficher / masquer les réglages graphiques">🎨 Graphismes</button>
     <button data-panel="log" title="Afficher / masquer le journal des déplacements">📜 Déplacements</button>
     <button data-panel="clock" title="Afficher / masquer la pendule">⏱ Pendule</button>
     <button data-panel="chat" id="btn-chat" class="hidden" title="Échanger des messages avec l'autre joueur">💬 Messagerie<span id="chat-badge" class="badge hidden"></span></button>
     <button data-panel="debug" title="Afficher / masquer les informations de débogage">🐞 Debug</button>
+    <button id="btn-classic" title="Maintenir appuyé : toutes les pièces en Classique, le temps de l'appui">♟ Classique</button>
   </nav>
 
   <div id="ui" class="panel hidden">
@@ -251,9 +254,24 @@
 
     <section class="section">
       <h3 class="section-title">Thème</h3>
-      <label class="theme-row"><span>Pièces</span>
-        <select id="theme-select"></select>
-      </label>
+      <!-- Les deux camps, liés ou non (comme le verrou de proportions des logiciels de dessin) -->
+      <div class="theme-pair">
+        <div class="theme-pair-rows">
+          <label class="theme-row"><span>Blancs</span>
+            <select id="theme-select"></select>
+          </label>
+          <label class="theme-row"><span>Noirs</span>
+            <select id="theme-select-b"></select>
+          </label>
+        </div>
+        <button id="theme-link" class="theme-link" type="button" aria-pressed="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path class="link-top" d="M9 10.5V7a3 3 0 0 1 6 0v3.5"/>
+            <path class="link-bottom" d="M9 13.5V17a3 3 0 0 0 6 0v-3.5"/>
+            <path class="link-bar" d="M12 9.5v5"/>
+          </svg>
+        </button>
+      </div>
       <label class="theme-row"><span>Plateau</span>
         <select id="board-select"></select>
       </label>
@@ -263,6 +281,9 @@
       <h3 class="section-title">Rendu</h3>
       <label class="theme-row" title="Lissage des contours (plus coûteux en bas de la liste)"><span>Anticrénelage</span>
         <select id="aa-select"></select>
+      </label>
+      <label class="theme-row" title="Au survol d'une pièce d'un thème illustré, montre en transparence la pièce classique qu'elle représente"><span>Fantôme classique</span>
+        <input type="checkbox" id="ghost-toggle" />
       </label>
     </section>
   </div>
@@ -353,8 +374,8 @@
         s.onerror = () => reject(new Error(`Impossible de charger js/${name}.js`));
         document.body.appendChild(s);
       });
-      // Seul le thème de pièces mémorisé est chargé au départ (les autres : au premier choix)
-      if (name === 'pieces') await loadTheme(startupTheme);
+      // Seuls les thèmes de pièces mémorisés sont chargés au départ (les autres : au premier choix)
+      if (name === 'pieces') await Promise.all([loadTheme(startupThemes.w), loadTheme(startupThemes.b)]);
     }
   </script>
 </body>

@@ -18,6 +18,8 @@ const Online = (() => {
   const $ = id => document.getElementById(id);
   const params = new URLSearchParams(location.search);
   const inviteRoom = params.get('partie');
+  // Identifiant de la page : une reconnexion n'ouvre pas une nouvelle session (compteur de l'administration)
+  const pageId = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
   const watchRoom = params.get('regarder');
 
   let ws = null, color = null, active = false, names = { w: '', b: '' }, hostName = '';
@@ -39,7 +41,7 @@ const Online = (() => {
 
   function connect(onOpen) {
     if (ws && ws.readyState <= 1) { if (ws.readyState === 1) onOpen(); else ws.addEventListener('open', onOpen, { once: true }); return; }
-    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?p=${pageId}`);
     ws.addEventListener('open', onOpen, { once: true });
     ws.addEventListener('message', e => { try { onMessage(JSON.parse(e.data)); } catch (err) { console.warn(err); } });
     ws.addEventListener('close', () => {
@@ -90,7 +92,7 @@ const Online = (() => {
         if (color === 'w') sendStyle(); // au départ, l'invité adopte les pièces et le plateau de l'hôte
         break;
       case 'style': // l'adversaire a changé de pièces ou de plateau
-        if (isTheme(msg.theme) && msg.theme !== currentTheme) applyTheme(msg.theme, { remote: true });
+        { const t = parseThemeStyle(msg.theme); if (t) applyThemes(t, { remote: true }); }
         if (BOARDS[msg.board] && msg.board !== currentBoard) applyBoard(msg.board, { remote: true });
         break;
       case 'move': {
@@ -216,7 +218,7 @@ const Online = (() => {
   }
 
   // Pièces et plateau partagés : les deux joueurs voient le même jeu
-  function sendStyle() { if (active) sendMsg({ type: 'style', theme: currentTheme, board: currentBoard }); else soloChanged(); }
+  function sendStyle() { if (active) sendMsg({ type: 'style', theme: themeStyle(), board: currentBoard }); else soloChanged(); }
 
   // --- Partie solo, visible dans l'administration ---------------------------------------
   // Jeu servi par le serveur : la position est envoyée à chaque changement (au plus 4 fois
@@ -283,8 +285,16 @@ const Online = (() => {
     }
   }
   function setFollow(id) {
+    const was = follow;
     follow = id;
     controls.enabled = id === 'free'; // en suivant un joueur, la souris ne déplace plus la vue
+    // Retour à la vue libre depuis la vue d'un joueur : on recule un peu, en douceur, pour ne pas
+    // rester à l'intérieur du repère de sa caméra (qui apparaît alors devant nous)
+    if (id === 'free' && was !== 'free' && cams[was] && watching) {
+      const back = v1.copy(camera.position).sub(controls.target).normalize();
+      const to = camera.position.clone().addScaledVector(back, 1.8).add(v2.set(0, 0.5, 0));
+      CameraFly.to(to, controls.target.clone(), 700);
+    }
     if (id === 'free' && Math.abs(camera.fov - FOV) > 0.01) { camera.fov = FOV; camera.updateProjectionMatrix(); }
     updateCamBar();
     updateMarkers();
@@ -318,6 +328,17 @@ const Online = (() => {
       m.sight.computeLineDistances();
       m.g.visible = m.sight.visible = camShow.checked && color !== follow; // pas le repère de la vue suivie
     }
+    hideNearMarkers();
+  }
+  // Un repère trop proche de notre caméra (moins d'une case environ) est masqué : il ne remplit
+  // jamais l'écran, même en tournant ou en zoomant jusqu'à lui
+  const NEAR = 1.1;
+  function hideNearMarkers() {
+    if (!camShow.checked) return;
+    for (const [color, m] of Object.entries(markers)) {
+      if (color === follow) continue;
+      m.g.visible = m.sight.visible = camera.position.distanceTo(m.g.position) > NEAR;
+    }
   }
   camShow.onchange = updateMarkers;
   function clearCams() {
@@ -332,6 +353,7 @@ const Online = (() => {
   function frame() {
     const now = performance.now(), dt = Math.min(0.5, (now - (lastFrame || now)) / 1000);
     lastFrame = now;
+    if (watching) hideNearMarkers();
     const c = watching && follow !== 'free' && cams[follow];
     if (!c) return;
     const k = 1 - Math.exp(-dt * 12);

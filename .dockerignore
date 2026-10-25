@@ -14,3 +14,6 @@ docker-compose.yml
 .env.*
 deploy
 admin/dist
+data
+tools
+hyper3d

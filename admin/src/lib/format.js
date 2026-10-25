@@ -22,6 +22,9 @@ export function clock(ms) {
 
 export const time = t => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+export const day = t => new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+export const count = n => (n ?? 0).toLocaleString('fr-FR');
+
 export function bytes(n) {
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(0)} Ko`;
   return `${(n / 1024 ** 2).toFixed(1)} Mo`;
@@ -51,7 +54,7 @@ export const ROLE = {
   solo: { label: 'Solo', tone: 'ok' },
   lobby: { label: 'Accueil', tone: 'muted' },
 };
-export const THEMES = { classic: 'Classique', medieval: 'Médiéval', dragons: 'Dragons', crystal: 'Cristal' };
+export const THEMES = { classic: 'Classique', medieval: 'Médiéval', dragons: 'Dragons', crystal: 'Cristal', farm: 'La Ferme des animaux' };
 export const BOARDS = { wood: 'Bois clair', glass: 'Verre noir' };
 
 // Position reconstituée à partir des coups (roque, prise en passant et promotion compris).

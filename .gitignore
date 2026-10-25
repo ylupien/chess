@@ -3,6 +3,8 @@
 .vscode/
 Thumbs.db
 node_modules/
+__pycache__/
+*.pyc
 
 # Configuration locale (adresse publique…) — modèle versionné : .env.example
 .env
@@ -10,5 +12,16 @@ node_modules/
 # Identifiants du tunnel Cloudflare (générés par scripts/web.sh)
 deploy/cloudflared/
 
+# Compteurs de l'administration (server/counters.js)
+data/
+
 # Page d'administration compilée (npm run build:admin)
 admin/dist/
+
+# Modèles 3D générés (tools/modeles3d)
+tools/modeles3d/sortie/
+
+# Sources des modèles détaillés : zips Rodin (Hyper3D) et images générées, trop lourds pour git.
+# Le jeu n'a besoin que de js/farm-models.js, produit à partir d'eux (tools/modeles3d/vers_js.py).
+hyper3d/
+tools/modeles3d/images/

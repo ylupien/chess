@@ -277,6 +277,25 @@ function clientIp(req) {
 }
 const connPerIp = new Map(); // adresse → nombre de connexions ouvertes
 const stats = { bootAt: Date.now(), connections: 0, gamesStarted: 0, peak: 0 };
+// Totaux depuis la mise en service, conservés dans DATA_DIR/counters.json entre deux redémarrages
+const counters = require('./counters').createCounters(process.env.DATA_DIR || path.join(ROOT, 'data'));
+// Session = une page du jeu ouverte. Ses reconnexions (même identifiant ?p=) ne comptent pas.
+const pagesSeen = new Map(); // identifiant de page → dernière connexion
+const PAGE_TTL = 12 * 3600e3, MAX_PAGES = 20000;
+function countSession(req) {
+  let id = '';
+  try { id = new URL(req.url, 'http://x').searchParams.get('p') || ''; } catch { }
+  id = /^[a-z0-9]{6,32}$/.test(id) ? id : '';
+  const now = Date.now();
+  if (id && pagesSeen.has(id)) { pagesSeen.delete(id); pagesSeen.set(id, now); return; }
+  counters.add('sessions');
+  if (!id) return;
+  pagesSeen.set(id, now);
+  for (const [k, at] of pagesSeen) { // les plus anciennes d'abord
+    if (pagesSeen.size <= MAX_PAGES && now - at < PAGE_TTL) break;
+    pagesSeen.delete(k);
+  }
+}
 
 // --- Administration : état en temps réel des connexions et des parties ----------------------
 function adminSnapshot() {
@@ -289,6 +308,7 @@ function adminSnapshot() {
   return {
     type: 'snapshot', now,
     server: { bootAt: stats.bootAt, connectionsTotal: stats.connections, gamesStarted: stats.gamesStarted, peak: stats.peak,
+      totals: counters.data,
       rss: process.memoryUsage().rss, node: process.version, maxRooms: MAX_ROOMS },
     rooms: [...rooms].map(([id, r]) => {
       const last = r.moves.at(-1);
@@ -347,6 +367,8 @@ wss.on('connection', (ws, req) => {
   if (count > MAX_CONN_PER_IP) return ws.close(1008, 'Trop de connexions');
   connPerIp.set(ip, count);
   stats.peak = Math.max(stats.peak, wss.clients.size);
+  counters.max('peak', wss.clients.size);
+  countSession(req);
   admin.changed();
   ws.on('close', () => { const n = connPerIp.get(ip) - 1; if (n > 0) connPerIp.set(ip, n); else connPerIp.delete(ip); admin.changed(); });
 
@@ -410,7 +432,7 @@ wss.on('connection', (ws, req) => {
           room.startedAt = Date.now();
           room.moves = [];
           room.games = 1;
-          stats.gamesStarted++;
+          stats.gamesStarted++; counters.add('gamesStarted');
           const start = { type: 'start', white: room.hostName, black: room.guestName };
           emit(room.host, start);
           emit(room.guest, start);
@@ -427,7 +449,7 @@ wss.on('connection', (ws, req) => {
           if (msg.accept) {
             room.moves = [];
             room.games++;
-            stats.gamesStarted++;
+            stats.gamesStarted++; counters.add('gamesStarted'); counters.add('gamesStarted');
             emit(ws, { type: 'rematch-start' }); emit(other, { type: 'rematch-start' }); toWatchers(room, { type: 'rematch-start' });
             resetClock(room);
           }
@@ -504,7 +526,7 @@ wss.on('connection', (ws, req) => {
         if (ws.room || ws.watching) break;
         const st = msg.state === null ? null : cleanSolo(msg.state);
         if (msg.state !== null && !st) break;
-        if (st && !ws.solo) ws.soloSince = Date.now();
+        if (st && !ws.solo) { ws.soloSince = Date.now(); counters.add('soloGames'); }
         ws.solo = st;
         ws.soloAt = Date.now();
         const out = st ? { type: 'solo', state: st } : { type: 'room-closed' };
@@ -597,6 +619,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     for (const ws of wss.clients) ws.close(1001, 'Serveur arrêté');
     admin.close();
+    counters.flush();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000).unref();
   });

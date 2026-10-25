@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import Logo from './Logo.svelte';
   import MiniBoard from './MiniBoard.svelte';
-  import { duration, clock, time, bytes, browser, ROOM_STATUS, ROLE, THEMES, BOARDS } from './format.js';
+  import { duration, clock, time, day, count, bytes, browser, ROOM_STATUS, ROLE, THEMES, BOARDS } from './format.js';
 
   let { onlogout } = $props();
 
@@ -98,10 +98,18 @@
     <p class="loading muted">Réception de l'état du serveur…</p>
   {:else}
     <section class="stats">
+      {#if snap.server.totals}
+        {@const t = snap.server.totals}
+        <div class="stat" title="Une session = une page du jeu ouverte. Total conservé entre les redémarrages du serveur.">
+          <span class="label">Sessions</span>
+          <span class="value">{count(t.sessions)}</span>
+          <span class="hint">depuis le {day(t.since)} · parties : {count(t.gamesStarted)} en ligne, {count(t.soloGames)} solo</span>
+        </div>
+      {/if}
       <div class="stat">
         <span class="label">Connexions</span>
         <span class="value">{connections.length}</span>
-        <span class="hint">pic {snap.server.peak} · {snap.server.connectionsTotal} depuis le démarrage</span>
+        <span class="hint">pic {snap.server.peak}{#if snap.server.totals} · record {snap.server.totals.peak}{/if} · {snap.server.connectionsTotal} depuis le démarrage</span>
       </div>
       <div class="stat">
         <span class="label">Parties en cours</span>
@@ -192,7 +200,7 @@
                     <dt>Coups</dt><dd>{r.moves}{#if r.last}<span class="mono faint"> · {r.last}</span>{/if}</dd>
                     <dt>{r.startedAt ? 'Durée' : 'Ouverte'}</dt>
                     <dd>{duration(serverNow - (r.startedAt || r.createdAt))}{#if r.games > 1}<span class="faint"> · partie {r.games}</span>{/if}</dd>
-                    {#if r.theme}<dt>Style</dt><dd>{THEMES[r.theme] ?? r.theme} · {BOARDS[r.board] ?? r.board}</dd>{/if}
+                    {#if r.theme}<dt>Style</dt><dd>{r.theme.split('/').map(t => THEMES[t] ?? t).join(' – ')} · {BOARDS[r.board] ?? r.board}</dd>{/if}
                   </dl>
                 </div>
               </div>

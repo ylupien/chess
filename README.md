@@ -50,7 +50,7 @@ Le conteneur est verrouillé pour qu'une faille éventuelle du serveur n'atteign
 
 - **Image distroless** : Node seul, sans shell ni gestionnaire de paquets ni outils système.
 - **Utilisateur sans privilège** (uid 65532), aucune capacité Linux (`cap_drop: ALL`), `no-new-privileges`.
-- **Système de fichiers en lecture seule** ; seul un `/tmp` de 8 Mo, non exécutable, est inscriptible.
+- **Système de fichiers en lecture seule** ; seuls un `/tmp` de 8 Mo, non exécutable, et `/data` (volume des compteurs, un fichier JSON) sont inscriptibles.
 - **Ressources bornées** : 256 Mo de mémoire, 1 processeur, 64 processus.
 - **Port publié sur `127.0.0.1` seulement** : le jeu n'est joignable de l'extérieur que par le tunnel Cloudflare (voir plus bas).
 
@@ -75,6 +75,7 @@ Variables d'environnement :
 | `MAX_ROOMS` | Nombre maximal de salles ouvertes. |
 | `MAX_CONN_PER_IP` | Nombre maximal de connexions par adresse. |
 | `ADMIN_PASSWORD` | Mot de passe de la page d'administration (12 caractères au moins). Vide : administration désactivée. Lu dans `.env`. |
+| `DATA_DIR` | Dossier du fichier des compteurs de l'administration (`counters.json`). Par défaut `data/` ; `/data` dans Docker. |
 
 ### Publier sur le web (Cloudflare Tunnel)
 
@@ -119,6 +120,7 @@ Pendant une partie en ligne, chacun ne joue que ses pièces, à son tour. Le pla
 
 La page **`/admin/`** (par exemple http://localhost:8080/admin/) est protégée par le mot de passe `ADMIN_PASSWORD` de `.env`. Elle montre en temps réel :
 
+- **Sessions** : nombre total de pages du jeu ouvertes (une reconnexion ne compte pas), avec les parties en ligne et solo commencées et le record de connexions simultanées. Ces totaux sont gardés dans `counters.json` (dossier `DATA_DIR`, par défaut `data/`, hors Git ; dans Docker, le volume `chess-data`, conservé par `docker compose down`) et continuent de monter d'un redémarrage à l'autre.
 - **Statistiques** : connexions (et pic), parties en ligne, parties solo, salles en attente, spectateurs, durée de fonctionnement et mémoire du serveur.
 - **Parties** :
   - état (en attente, invité connecté, en cours, abandonnée) et joueurs, avec leur connexion ;
@@ -177,7 +179,7 @@ Les sources et auteurs sont listés dans `sounds/ecouter.html`, qui permet aussi
 
 ### Pendule
 
-Le panneau **⏱ Pendule** propose les cadences officielles (bullet, blitz, rapide, classique FIDE 90 min + 30 s), avec ou sans incrément Fischer. Seule la pendule du camp au trait tourne ; elle démarre après le premier coup des Blancs. Au temps écoulé, le joueur perd, sauf si l'adversaire n'a plus de quoi mater (roi seul, ou roi et un fou ou un cavalier) : partie nulle. Pause et réinitialisation disponibles ; la pendule s'arrête en placement libre. Par défaut : *Sans pendule*.
+Le panneau **⏱ Pendule** propose les cadences officielles (bullet, blitz, rapide, classique FIDE 90 min + 30 s), avec ou sans incrément Fischer. Seule la pendule du camp au trait tourne ; elle démarre après le premier coup des Blancs. Au temps écoulé, le joueur perd, sauf si l'adversaire n'a plus de quoi mater (roi seul, ou roi et un fou ou un cavalier) : partie nulle. Pause et réinitialisation disponibles ; la pendule s'arrête en placement libre. Par défaut : *Sans pendule*. Panneau fermé, un point devant le bouton ⏱ Pendule de la barre de menu indique son état : doré, cadence réglée mais arrêtée (pas encore commencée ou en pause) ; vert pulsé, en marche ; rouge pulsé, moins de 20 secondes ; rouge fixe, temps écoulé.
 
 ### Journal des déplacements
 
@@ -188,14 +190,36 @@ Sous chaque coup, une ligne indique la pièce jouée et son trajet (« Cavalier 
 
 | Sélecteur | Choix |
 |---|---|
-| **Pièces** | *Médiéval* (personnages : fantassin, tour de guet avec arbalétrier, chevalier à cheval, évêque, reine, roi) · *Dragons* (par défaut ; dragonnet sortant de l'œuf, dragon enroulé autour d'une tour, wyverne, mage draconique, dragonne royale, roi dragon sur son trésor ; ivoire et or contre obsidienne et braise) · *Classique* (style Staunton en buis et ébène) · *Cristal* (les pièces classiques en verre, avec réfraction réelle du plateau : verre dépoli blanc laiteux contre verre fumé noir et brillant, pour bien distinguer les camps) |
+| **Blancs** et **Noirs** | Un thème par camp, librement mélangés (par exemple *La Ferme des animaux* contre *Médiéval* : les animaux face aux humains). Le bouton à maillons de chaîne, à droite des deux listes, les lie comme le verrou de proportions d'un logiciel de dessin : lié, un choix s'applique aux deux camps ; délié, chaque camp garde le sien. Thèmes : *La Ferme des animaux* (voir ci-dessous) · *Médiéval* (personnages : fantassin, tour de guet avec arbalétrier, chevalier à cheval, évêque, reine, roi) · *Dragons* (par défaut ; dragonnet sortant de l'œuf, dragon enroulé autour d'une tour, wyverne, mage draconique, dragonne royale, roi dragon sur son trésor ; ivoire et or contre obsidienne et braise) · *Classique* (style Staunton en buis et ébène) · *Cristal* (les pièces classiques en verre, avec réfraction réelle du plateau : verre dépoli blanc laiteux contre verre fumé noir et brillant, pour bien distinguer les camps) |
 | **Plateau** | *Verre noir* (par défaut ; verre fumé noir et opalin, vrais reflets des pièces, filets dorés, cadre laqué) · *Bois clair* |
 
-Les choix de thème et la position des panneaux sont mémorisés dans le navigateur. En partie en ligne, pièces et plateau sont partagés (voir plus haut).
+Les choix de thème (de chaque camp, et la liaison) et la position des panneaux sont mémorisés dans le navigateur. En partie en ligne, pièces et plateau sont partagés (voir plus haut).
+
+#### La Ferme des animaux
+
+D'après le roman de George Orwell. Chaque pièce est un personnage sculpté en détail (modèles 3D générés par Rodin / Hyper3D, puis finis dans Blender : voir [tools/modeles3d](tools/modeles3d/README.md)), posé sur un socle de bois :
+
+| Pièce | Personnage |
+|---|---|
+| Roi | **Napoléon**, le verrat en redingote grise, bicorne, épaulettes dorées et canne. |
+| Dame | **Brille-Babil**, le petit cochon propagandiste en gilet et nœud papillon, son feuillet de chiffres à la main. |
+| Tours | **Douce** (aile dame), la jument claire à la longue crinière · **Malabar** (aile roi), le cheval de trait en harnais de cuir. |
+| Fous | **Moïse** (aile dame), le corbeau apprivoisé, perché sur sa branche · **Minimus** (aile roi), le cochon poète couronné, sa grande plume à côté de lui. |
+| Cavaliers | **Les chiens de Napoléon** : molosses au collier clouté. |
+| Pions | **Les poules**, qui se révoltent quand Napoléon leur prend leurs œufs. |
+
+Les Noirs ont les mêmes modèles, assombris. Les modèles sont embarqués dans `js/farm-models.js` (environ 13 Mo, chargé seulement avec ce thème). Si ce fichier manque, chaque pièce reprend sa version construite par le code de `js/farm.js` (Napoléon au fouet, Brille-Babil sur sa caisse, Moïse sur la Montagne de Sucrecandi, les moutons en pions…).
+
+Les deux tours et les deux fous d'un camp sont des personnages différents, selon leur colonne de départ (aile dame : colonnes a à d ; aile roi : e à h).
 
 ### Barre de menu et panneau Debug
 
-La barre en haut de l'écran affiche ou masque les cinq panneaux : **🎛 Contrôles** (sections Partie, Caméra, Audio), **🎨 Graphismes** (thème des pièces, plateau, anticrénelage), **📜 Déplacements**, **⏱ Pendule** et **🐞 Debug** (tous fermés par défaut, choix mémorisé).
+La barre en haut de l'écran affiche ou masque les cinq panneaux : **🎛 Contrôles** (sections Partie, Caméra, Audio), **🎨 Graphismes** (thème des pièces de chaque camp, plateau, anticrénelage, fantôme classique), **📜 Déplacements**, **⏱ Pendule** et **🐞 Debug** (tous fermés par défaut, choix mémorisé). Le bouton **Accueil** est à part, dans le coin gauche.
+
+Pour reconnaître les personnages d'un thème illustré :
+
+- **♟ Classique** (dernier bouton de la barre) : tant qu'il est maintenu appuyé (souris, doigt, ou Espace / Entrée), toutes les pièces s'affichent en Classique ; elles reviennent en le relâchant. Seul le joueur qui appuie le voit. Le bouton est masqué quand les deux camps ont déjà l'allure classique (Classique, Cristal).
+- **Fantôme classique** (case à cocher, panneau Graphismes, section Rendu, mémorisée) : au survol d'une pièce illustrée, la pièce classique qu'elle représente apparaît en transparence par-dessus, dans le bois de son camp.
 Le panneau Debug (masqué par défaut) montre en direct la caméra (position, cible, distance, azimut, inclinaison, champ de vision, rotation), le rendu (images/s, appels de dessin, triangles, mémoire), l'écran et l'état du jeu (thèmes, mode, sélection, case sous la souris, musique). **Copier la caméra** copie sa position et sa cible en JSON.
 
 ### Anticrénelage
@@ -206,7 +230,7 @@ Le sélecteur **Anticrénelage** (panneau Graphismes) propose : *Natif* (lissage
 
 - Glisser dans le vide : tourner · molette : zoomer · clic droit : déplacer.
 - À l'ouverture, l'écran d'accueil affiche le logo (roi Staunton doré en image vectorielle et titre « Échiquier » en lettres classiques) et propose **Jouer** : ce clic lance la musique, puis l'image apparaît en fondu depuis le noir (5 s). La rotation automatique reste arrêtée tant qu'on est sur l'accueil.
-- **Accueil** (premier bouton de la barre de menu, avec le petit logo) : une confirmation « Quitter la partie ? » évite de perdre la partie par erreur (**Continuer la partie** ou **Quitter la partie** ; Échap ou un clic à côté annule). En quittant, le plateau est remis au départ, la caméra revient à la vue initiale et l'accueil réapparaît : **Jouer** y démarre une nouvelle partie. En ligne, quitter met fin à la partie et l'adversaire en est informé.
+- **Accueil** (bouton du coin supérieur gauche, avec le petit logo) : une confirmation « Quitter la partie ? » évite de perdre la partie par erreur (**Continuer la partie** ou **Quitter la partie** ; Échap ou un clic à côté annule). En quittant, le plateau est remis au départ, la caméra revient à la vue initiale et l'accueil réapparaît : **Jouer** y démarre une nouvelle partie. En ligne, quitter met fin à la partie et l'adversaire en est informé.
 - Boutons **Vue blancs**, **Vue noirs**, **Dessus** (vue de départ : distance 9, inclinaison 69°, caméra à 2,83 de hauteur ; réglable via `START_VIEW` dans `js/scene.js`) et **⟳ Rotation** automatique : active par défaut, elle démarre en douceur, se met en pause pendant qu'on fait glisser une pièce, et sa vitesse se règle avec un curseur (6 % par défaut, mémorisé).
 - Les panneaux se déplacent en les tirant par leur barre de titre.
 
@@ -222,6 +246,8 @@ js/pieces.js      pièces classiques, bois généré, système de thèmes de pi�
 js/medieval.js    thème Médiéval (les six personnages)
 js/dragons.js     thème Dragons (les six sculptures draconiques)
 js/crystal.js     thème Cristal (pièces classiques en verre transparent)
+js/farm.js        thème La Ferme des animaux (les personnages d'Orwell)
+js/farm-models.js modèles détaillés de la Ferme (.glb en base64, généré par tools/modeles3d)
 js/rules.js       moteur de règles (indépendant de la 3D)
 js/notation.js    notation des coups et noms des pièces
 js/panels.js      panneaux déplaçables
@@ -234,6 +260,7 @@ js/online.js      parties en ligne (WebSocket)
 js/endgame.js     fin de partie (encart, caméra vers le roi gagnant)
 server/server.js  serveur Node : fichiers statiques et WebSocket
 server/admin.js   administration : mot de passe, sessions, flux en temps réel
+server/counters.js compteurs cumulés (sessions, parties) dans data/counters.json
 admin/            page d'administration (Svelte 5 + Vite) ; compilée dans admin/dist
 scripts/dev.mjs   mode développement (serveur relancé à chaque modification + Vite en direct)
 Dockerfile        image du serveur (distroless, utilisateur sans privilège)
@@ -242,6 +269,8 @@ scripts/web.sh    publication sur le web par Cloudflare Tunnel
 .env.example      modèle de configuration (adresse publique) ; copie locale .env hors Git
 js/clock.js       pendule d'échecs (cadences, incrément, temps écoulé)
 js/main.js        état du jeu, animations, interactions, interface, journal
+tools/modeles3d/  fabrication des modèles détaillés (images IA, finition Blender, export)
+hyper3d/          zips téléchargés de Rodin (hors Git)
 ```
 
 ### Pourquoi des scripts classiques et non des modules ES ?
@@ -255,7 +284,7 @@ Pour ajouter un fichier, insérez son nom à la bonne place dans le tableau `FIL
 
 Seul le nécessaire est téléchargé à l'ouverture :
 
-- **Thèmes de pièces** : seul le thème mémorisé (Dragons par défaut) est chargé ; les autres fichiers (`medieval.js`, `crystal.js`…) le sont au premier choix dans le sélecteur.
+- **Thèmes de pièces** : seuls les thèmes mémorisés des deux camps (Dragons par défaut) sont chargés ; les autres fichiers (`medieval.js`, `farm.js`…) le sont au premier choix dans un sélecteur.
 - **Anticrénelage** : les modules de post-traitement de Three.js (FXAA, SMAA…) ne sont chargés que si l'on choisit un de ces modes.
 - **Musique** : un seul morceau est téléchargé à la fois, celui qui joue ; passer au suivant interrompt le téléchargement du précédent.
 - **Cache** : le serveur inscrit dans `index.html` une empreinte du code (`js/`, `css/`), ajoutée en `?v=…` à l'adresse de chaque fichier. Les fichiers restent en cache un an (navigateur et Cloudflare), et une mise à jour change leur adresse : jamais d'ancienne version. La page elle-même est revérifiée à chaque visite, le texte est compressé en gzip et les sons sont gardés une semaine. Ouvert depuis le disque, la dernière version est toujours relue.
@@ -275,7 +304,18 @@ registerTheme('mon-theme', {
 
 - Chaque constructeur renvoie un `THREE.Group`. Le personnage regarde vers `+z`, et ses unités sont celles des pièces classiques (réduites ensuite par `PIECE_SCALE`).
 - Chaque maillage peut porter un rôle de matériau (`mesh.userData.role = 'metal'`). Sans rôle, il prend le matériau `body`.
-- Un type absent du thème, ou dont la construction échoue, utilise automatiquement le modèle classique.
+- Un type absent du thème, ou dont la construction échoue, utilise automatiquement le modèle classique : un thème peut être publié pièce par pièce (le sélecteur affiche « n/6 pièces »).
+- Un constructeur peut être une paire `[aile dame, aile roi]` (par exemple `r: [makeDouce, makeMalabar]`) : les deux tours, ou les deux fous, sont alors deux personnages. Une case vide de la paire donne la pièce classique.
+
+### Modèles détaillés (.glb)
+
+Un thème peut remplacer ses constructeurs par des modèles 3D finis (voir [tools/modeles3d](tools/modeles3d/README.md)).
+
+- **Fichier** : les `.glb` sont embarqués dans `js/<thème>-models.js`, car un navigateur refuse de lire un `.glb` depuis le disque (`file://`), mais accepte un script.
+- **Clés** : chaque modèle s'inscrit par `registerModel('<thème>:<pièce>[:<aile>]', base64)`, par exemple `farm:k` ou `farm:r:1` (0 = aile dame, 1 = aile roi).
+- **Compression** : les modèles sont compressés par gltfpack (meshopt, sommets quantifiés ; textures en WebP). `loadModels(thème)` (`js/pieces.js`) les décode avec le `MeshoptDecoder` de Three.js et repasse les sommets en flottants.
+- **Thème prêt** : le thème annonce `ready` (une promesse), et n'est affiché qu'une fois ses modèles lus. Voir la fin de `js/farm.js`.
+- **Matériaux** : `body` est le socle, aux couleurs du thème ; les autres matériaux du modèle sont repris tels quels, et assombris pour les Noirs.
 
 ## Moteur de règles
 

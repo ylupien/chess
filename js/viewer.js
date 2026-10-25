@@ -1,6 +1,6 @@
 // Visualiseur de pièce : fenêtre avec sa propre scène 3D pour admirer une pièce sous tous les angles.
 // Script classique (chargé par index.html dans l'ordre). Dépend de : THREE, OrbitControls,
-// RoomEnvironment, pieces.js (buildModel, THEMES, currentTheme), notation.js (pieceLabel, sqName).
+// RoomEnvironment, pieces.js (buildModel, THEMES, themeOf), notation.js (pieceLabel, sqName).
 const PieceViewer = (() => {
   const MOVES = {
     p: "Avance d'une case (deux depuis sa case de départ) et prend en diagonale. Arrivé au bout du plateau, il est promu.",
@@ -76,7 +76,7 @@ const PieceViewer = (() => {
 
   function showModel() {
     if (model) vscene.remove(model);
-    model = buildModel(current.type, shownWhite);
+    model = buildModel(current.type, shownWhite, current.side);
     model.rotation.y = 0; // de face
     vscene.add(model);
     // Cadrage automatique sur la pièce
@@ -92,7 +92,10 @@ const PieceViewer = (() => {
 
     const piece = { type: current.type, white: shownWhite };
     titleEl.textContent = pieceLabel(piece);
-    const themeTitle = THEMES[currentTheme].titles?.[current.type];
+    // Titre du personnage, seulement si le thème a déjà ce modèle (sinon : pièce classique)
+    const th = THEMES[themeOf(shownWhite)];
+    let themeTitle = th.builders[current.type] && th.titles?.[current.type];
+    if (Array.isArray(themeTitle)) themeTitle = themeTitle[current.side || 0];
     const where = current.white === shownWhite
       ? (current.sq >= 0 ? `Case ${sqName(current.sq)}` : 'En réserve')
       : 'Aperçu dans l\'autre couleur';

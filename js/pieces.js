@@ -261,6 +261,8 @@ const blackMat = new THREE.MeshPhysicalMaterial({
 // « rôle » (body, cloth, metal, skin…). Les maillages sans rôle prennent « body ».
 // Si un type manque dans un thème (ou si sa construction échoue),
 // c'est le modèle classique qui est utilisé.
+// Un constructeur peut aussi être une paire [aile dame, aile roi] : les deux tours (ou les
+// deux fous) d'un camp sont alors deux personnages différents, selon leur colonne de départ.
 const THEMES = {
   classic: {
     name: 'Classique',
@@ -268,35 +270,96 @@ const THEMES = {
     materials: white => ({ body: white ? whiteMat : blackMat }),
   },
 };
-let currentTheme = 'classic';
+// Un thème par camp : on peut mélanger (Dragons pour les Blancs, Classique pour les Noirs…)
+const pieceThemes = { w: 'classic', b: 'classic' };
+const themeOf = white => pieceThemes[white ? 'w' : 'b'];
 const templateCache = {}; // « thème:type » → modèle (les pièces en sont des clones)
 
 function registerTheme(id, theme) { THEMES[id] = theme; }
-function setPieceTheme(id) { if (THEMES[id]) currentTheme = id; return currentTheme; }
+// color : 'w' ou 'b' ; sans couleur, les deux camps
+function setPieceTheme(id, color) {
+  if (!THEMES[id]) return;
+  if (color !== 'b') pieceThemes.w = id;
+  if (color !== 'w') pieceThemes.b = id;
+}
+// Style échangé en ligne : « farm/medieval » (Blancs/Noirs), ou un seul nom si les camps sont pareils
+const themeStyle = () => pieceThemes.w === pieceThemes.b ? pieceThemes.w : `${pieceThemes.w}/${pieceThemes.b}`;
+function parseThemeStyle(str) {
+  const [w, b = w] = String(str || '').split('/');
+  return isTheme(w) && isTheme(b) ? { w, b } : null;
+}
 
 // Thèmes chargés à la demande : le fichier d'un thème (js/<id>.js, plusieurs dizaines de Ko)
 // n'est téléchargé que lorsqu'on le choisit. Au démarrage, seul le thème mémorisé est chargé.
-const THEME_FILES = { medieval: 'Médiéval', dragons: 'Dragons', crystal: 'Cristal' };
+const THEME_FILES = { medieval: 'Médiéval', dragons: 'Dragons', crystal: 'Cristal', farm: 'La Ferme des animaux' };
 const THEME_IDS = ['classic', ...Object.keys(THEME_FILES)]; // ordre du sélecteur
 const isTheme = id => THEME_IDS.includes(id);
 const themeName = id => THEMES[id]?.name || THEME_FILES[id];
 const themeLoads = {};
-function loadTheme(id) {
-  if (THEMES[id]) return Promise.resolve(true);
-  if (!isTheme(id)) return Promise.resolve(false);
-  return themeLoads[id] ??= new Promise(resolve => {
+function loadScript(src, optional = false) {
+  return new Promise(resolve => {
     const s = document.createElement('script');
-    s.src = `js/${id}.js${window.CACHE_BUST || ''}`;
-    s.onload = () => resolve(!!THEMES[id]);
-    s.onerror = () => { delete themeLoads[id]; console.error(`Impossible de charger js/${id}.js`); resolve(false); };
+    s.src = `${src}${window.CACHE_BUST || ''}`;
+    s.onload = () => resolve(true);
+    s.onerror = () => { if (!optional) console.error(`Impossible de charger ${src}`); resolve(false); };
     document.body.appendChild(s);
   });
 }
-// Thème du démarrage : celui mémorisé, sinon Dragons
-const startupTheme = (() => {
-  let saved = null;
-  try { saved = localStorage.getItem('chess3d:theme'); } catch { }
-  return isTheme(saved) ? saved : 'dragons';
+// Un thème peut annoncer `ready` (promesse) : il n'est utilisé qu'une fois prêt (modèles détaillés lus)
+function loadTheme(id) {
+  if (themeLoads[id]) return themeLoads[id];
+  if (THEMES[id]) return Promise.resolve(true);
+  if (!isTheme(id)) return Promise.resolve(false);
+  return themeLoads[id] = loadScript(`js/${id}.js`).then(async ok => {
+    if (!ok || !THEMES[id]) { delete themeLoads[id]; return false; }
+    try { await THEMES[id].ready; } catch (err) { console.error(`Thème ${id} :`, err); }
+    return true;
+  });
+}
+
+// Modèles détaillés (.glb finis par tools/modeles3d) : embarqués en base64 dans un script
+// (js/<thème>-models.js), car un navigateur refuse de lire un .glb depuis le disque (file://).
+const MODEL_DATA = {}; // « thème:pièce[:aile] » → base64
+function registerModel(key, b64) { MODEL_DATA[key] = b64; }
+// Les modèles sont compressés (meshopt) avec des sommets en entiers 16 bits : on les repasse en
+// flottants, sinon la fusion des maillages (mergeByRole) les écrêterait en les transformant
+function dequantize(scene) {
+  scene.traverse(o => {
+    if (!o.isMesh) return;
+    const g = o.geometry;
+    for (const [name, a] of Object.entries(g.attributes)) {
+      if (a.array instanceof Float32Array && !a.isInterleavedBufferAttribute && !a.normalized) continue;
+      const n = a.itemSize, out = new Float32Array(a.count * n), get = ['getX', 'getY', 'getZ', 'getW'];
+      for (let i = 0; i < a.count; i++) for (let k = 0; k < n; k++) out[i * n + k] = a[get[k]](i);
+      g.setAttribute(name, new THREE.BufferAttribute(out, n));
+    }
+  });
+  return scene;
+}
+// Lit les modèles d'un thème : { clé: THREE.Group } ; fichier absent ou modèle illisible : rien
+async function loadModels(theme) {
+  if (!await loadScript(`js/${theme}-models.js`, true)) return {};
+  const [{ GLTFLoader }, { MeshoptDecoder }] = await Promise.all([
+    import('three/addons/loaders/GLTFLoader.js'), import('three/addons/libs/meshopt_decoder.module.js')]);
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  const out = {};
+  const mine = Object.entries(MODEL_DATA).filter(([key]) => key.startsWith(theme + ':'));
+  await Promise.all(mine.map(async ([key, b64]) => {
+    try {
+      const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      out[key] = dequantize((await loader.parseAsync(bin.buffer, '')).scene);
+    } catch (err) { console.error(`Modèle ${key} illisible :`, err); }
+    delete MODEL_DATA[key];
+  }));
+  return out;
+}
+
+// Thèmes du démarrage : ceux mémorisés (Noirs : comme les Blancs par défaut), sinon Dragons
+const startupThemes = (() => {
+  let w = null, b = null;
+  try { w = localStorage.getItem('chess3d:theme'); b = localStorage.getItem('chess3d:theme-b'); } catch { }
+  w = isTheme(w) ? w : 'dragons';
+  return { w, b: isTheme(b) ? b : w };
 })();
 
 // Fusionne toutes les parties d'un modèle qui partagent le même rôle de matériau
@@ -340,13 +403,16 @@ function mergeByRole(group) {
   return out;
 }
 
-function getTemplate(type) {
-  for (const id of [currentTheme, 'classic']) {
+function getTemplate(type, side = 0, white = true, only) {
+  for (const id of only ? [only] : [themeOf(white), 'classic']) {
     const theme = THEMES[id];
-    if (!theme.builders[type]) continue;
-    const key = id + ':' + type;
+    let build = theme.builders[type];
+    if (Array.isArray(build)) build = build[side]; // personnage pas encore prêt : pièce classique
+    else side = 0;
+    if (!build) continue;
+    const key = id + ':' + type + side;
     if (!(key in templateCache)) {
-      try { templateCache[key] = mergeByRole(theme.builders[type]()); }
+      try { templateCache[key] = mergeByRole(build()); }
       catch (err) { console.error(`Thème ${id}, pièce ${type} :`, err); templateCache[key] = null; }
     }
     if (templateCache[key]) return { id, theme, tpl: templateCache[key] };
@@ -357,19 +423,22 @@ function getTemplate(type) {
 //   root   → position sur le plateau (placement, animations, glisser)
 //   wobble → effet « gelée » : inclinaison, écrasement, soulèvement
 //   model  → le modèle 3D lui-même
-function buildMesh(type, white) {
+// side : 0 = aile dame (colonnes a à d), 1 = aile roi (e à h), pour les thèmes à deux personnages
+function buildMesh(type, white, side = 0) {
   const wobble = new THREE.Group();
-  const model = buildModel(type, white);
+  const model = buildModel(type, white, side);
   wobble.add(model);
   const root = new THREE.Group();
   root.add(wobble);
   root.userData.wobble = wobble;
+  root.userData.model = model;
   root.userData.baseRadius = model.userData.baseRadius; // rayon du socle (pour ne pas traverser la table)
   return root;
 }
 
-function buildModel(type, white) {
-  const { id, theme, tpl } = getTemplate(type);
+// only : forcer un thème (« classic » pour le bouton Classique)
+function buildModel(type, white, side = 0, only) {
+  const { id, theme, tpl } = getTemplate(type, side, white, only);
   const m = tpl.clone();
   // Rayon du socle, en unités du plateau : pieds classiques (voir foot()) ou socle médiéval
   const classicShape = id === 'classic' || theme.shape === 'classic'; // Classique et Cristal
@@ -390,6 +459,45 @@ function buildModel(type, white) {
     m.rotation.y = (white ? Math.PI : 0) + (Math.random() - 0.5) * 0.25;
   }
   return m;
+}
+
+// Fantôme : la pièce classique en transparence, pour reconnaître un personnage d'un thème illustré.
+// null si la pièce a déjà l'allure classique (thèmes Classique et Cristal, ou personnage absent).
+// Même bois que les pièces classiques de son camp, en transparence. Dessiné par-dessus tout
+// (depthTest coupé) : visible même là où il est caché dans le personnage.
+const ghostMats = [blackMat, whiteMat].map(base => Object.assign(base.clone(), {
+  transparent: true, opacity: 0.6, depthWrite: false, depthTest: false,
+}));
+function buildGhost(type, white, side = 0) {
+  if (hasClassicLook(type, white, side)) return null;
+  const m = getTemplate(type, 0, true, 'classic').tpl.clone();
+  m.traverse(o => {
+    if (!o.isMesh) return;
+    o.material = ghostMats[+white];
+    o.castShadow = o.receiveShadow = false;
+    o.raycast = () => {}; // invisible au pointeur : ne masque pas les pièces derrière
+    o.renderOrder = 10; // après les pièces opaques
+  });
+  m.scale.setScalar(PIECE_SCALE);
+  if (type === 'n') m.rotation.y = white ? Math.PI / 2 : -Math.PI / 2; // tourné vers l'adversaire
+  return m;
+}
+
+// Bouton « Classique » maintenu : chaque pièce illustrée montre sa pièce classique à la place
+const hasClassicLook = (type, white, side = 0) => {
+  const { id, theme } = getTemplate(type, side, white);
+  return id === 'classic' || theme.shape === 'classic';
+};
+function setClassicView(root, on) {
+  const { wobble, model } = root.userData;
+  root.userData.classic?.removeFromParent();
+  root.userData.classic = null;
+  model.visible = true;
+  const p = root.userData.piece;
+  if (!on || !p || hasClassicLook(p.type, p.white, p.side)) return;
+  root.userData.classic = buildModel(p.type, p.white, 0, 'classic');
+  model.visible = false;
+  wobble.add(root.userData.classic);
 }
 
 // Nombre de pièces réellement modélisées par un thème (pour le sélecteur)

@@ -90,7 +90,7 @@
       ['Écran', `${size.x}×${size.y} · ratio ${renderer.getPixelRatio()}`],
       ['Anticrénelage', AA.label],
       ['Jeu', null],
-      ['Pièces / plateau', `${THEMES[currentTheme].name} / ${BOARDS[currentBoard].name}`],
+      ['Pièces / plateau', `${themeName(pieceThemes.w)} – ${themeName(pieceThemes.b)} / ${BOARDS[currentBoard].name}`],
       ['Mode · trait', `${mode === 'rules' ? 'Partie' : 'Libre'} · ${whiteToMove() ? 'Blancs' : 'Noirs'}`],
       ['Sélection', selected ? `${pieceLabel(selected)} (${sq(selected.sq)})` : '—'],
       ['Case sous la souris', sq(mouseSq)],

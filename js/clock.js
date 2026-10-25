@@ -102,8 +102,28 @@ const Clock = (() => {
     return h ? `${h}:${two(m % 60)}:${two(s % 60)}` : `${two(m)}:${two(s % 60)}`;
   }
 
+  // Indicateur sur le bouton « Pendule » de la barre de menu : visible même panneau fermé
+  const menuBtn = document.querySelector('#menubar [data-panel="clock"]');
+  let menuState = '';
+  function renderMenu(none) {
+    const ticking = !!running && !paused && !frozen && !flagged;
+    const low = ticking && remaining[running] < 20000;
+    const state = none ? '' : flagged ? 'flag' : low ? 'low' : ticking ? 'run' : 'set';
+    if (state === menuState || !menuBtn) return;
+    menuState = state;
+    menuBtn.dataset.clock = state;
+    menuBtn.title = {
+      '': 'Afficher / masquer la pendule',
+      set: 'Pendule active (arrêtée) · afficher / masquer',
+      run: 'Pendule en marche · afficher / masquer',
+      low: 'Pendule : moins de 20 secondes ! · afficher / masquer',
+      flag: 'Pendule : temps écoulé · afficher / masquer',
+    }[state];
+  }
+
   function render() {
     const none = control.id === 'none';
+    renderMenu(none);
     for (const side of ['w', 'b']) {
       const el = els[side];
       el.querySelector('.time').textContent = none ? '—:—' : format(remaining[side]);

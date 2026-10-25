@@ -16,12 +16,12 @@ RUN npm run build:admin
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force && mkdir -p /data
 
 # --- Étape 3 : image finale minimale (ni Svelte ni Vite : seulement la page compilée) ------
 FROM gcr.io/distroless/nodejs22-debian12:nonroot
 WORKDIR /app
-ENV NODE_ENV=production PORT=8080 HOST=0.0.0.0 SHOW_LAN=0
+ENV NODE_ENV=production PORT=8080 HOST=0.0.0.0 SHOW_LAN=0 DATA_DIR=/data
 # Fichiers appartenant à root : l'utilisateur du serveur peut les lire, pas les modifier
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
@@ -31,6 +31,8 @@ COPY js/ ./js/
 COPY css/ ./css/
 COPY sounds/ ./sounds/
 COPY --from=admin /app/admin/dist ./admin/dist/
+# Seul dossier modifiable : les compteurs de l'administration (volume chess-data)
+COPY --from=deps --chown=65532:65532 /data /data
 USER nonroot
 EXPOSE 8080
 CMD ["server/server.js"]

@@ -61,6 +61,23 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
 .theme-row select { flex: 1; min-width: 0; background: #2a2c33; color: var(--text); border: 1px solid rgba(255,255,255,.25);
   border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; cursor: pointer; }
 .theme-row select:hover { border-color: var(--accent); }
+.theme-row input[type=checkbox] { accent-color: var(--accent); margin: 0; cursor: pointer; }
+
+/* Thèmes des deux camps : crochet et chaîne qui les lient (comme le verrou de proportions) */
+.theme-pair { display: flex; align-items: stretch; gap: 4px; }
+.theme-pair-rows { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.theme-link { position: relative; flex: none; width: 22px; padding: 0; border: 0; background: none; cursor: pointer;
+  color: rgba(233, 230, 223, .45); display: grid; place-items: center; transition: color .15s; }
+.theme-link::before { content: ""; position: absolute; left: 2px; right: 9px; top: 15px; bottom: 15px;
+  border: 1px solid currentColor; border-left: 0; border-radius: 0 4px 4px 0; opacity: .6; }
+.theme-link svg { position: relative; background: #24262c; border-radius: 4px; padding: 1px 0; transform: translateX(3px); }
+.theme-link:hover { color: var(--text); }
+.theme-link[aria-pressed="true"] { color: var(--accent); }
+.theme-link svg path { transition: transform .15s; }
+.theme-link[aria-pressed="false"] .link-top { transform: translateY(-2px); }
+.theme-link[aria-pressed="false"] .link-bottom { transform: translateY(2px); }
+.theme-link[aria-pressed="false"] .link-bar { opacity: 0; }
+.theme-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
 
 /* Visualiseur de pièce */
 #viewer { position: fixed; inset: 0; z-index: 1500; display: flex; align-items: center; justify-content: center;
@@ -84,6 +101,24 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
   display: flex; gap: 6px; padding: 6px; border-radius: 10px; background: var(--panel);
   backdrop-filter: blur(6px); box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: calc(100vw - 32px); }
 #menubar button { white-space: nowrap; }
+/* Accueil : à part, dans le coin gauche */
+#homebar { position: fixed; top: 10px; left: 10px; z-index: 900; display: flex; padding: 6px; border-radius: 10px;
+  background: var(--panel); backdrop-filter: blur(6px); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+/* Écran étroit : la barre des panneaux se range à droite de l'Accueil au lieu d'être centrée */
+@media (max-width: 920px) {
+  #menubar { left: 134px; transform: none; max-width: calc(100vw - 144px); box-sizing: border-box; overflow-x: auto; }
+}
+#btn-classic { touch-action: none; user-select: none; -webkit-user-select: none; }
+#btn-classic.held { border-color: var(--accent); color: var(--accent); }
+/* Pendule active : point devant « ⏱ Pendule » (doré : réglée · vert pulsé : en marche · rouge : peu de temps / drapeau) */
+#menubar button[data-clock]::before { content: ""; display: inline-block; width: 7px; height: 7px;
+  margin-right: 6px; border-radius: 50%; vertical-align: 1px; background: var(--accent); box-shadow: 0 0 0 2px rgba(201, 162, 94, .25); }
+#menubar button[data-clock="run"]::before { background: #4cc38a; box-shadow: 0 0 6px #4cc38a; animation: clock-pulse 1.6s ease-in-out infinite; }
+#menubar button[data-clock="low"]::before { background: var(--danger); box-shadow: 0 0 6px var(--danger); animation: clock-pulse .6s ease-in-out infinite; }
+#menubar button[data-clock="flag"]::before { background: var(--danger); box-shadow: 0 0 0 2px rgba(229, 72, 77, .3); }
+#menubar button[data-clock=""]::before { content: none; }
+@keyframes clock-pulse { 50% { opacity: .35; transform: scale(.8); } }
+@media (prefers-reduced-motion: reduce) { #menubar button[data-clock]::before { animation: none !important; } }
 /* Petit logo (barre de menu, panneau Contrôles) */
 .logo-mini { width: 20px; height: 26px; vertical-align: middle; flex: none; }
 #btn-home { display: inline-flex; align-items: center; gap: 5px; font-family: "Cinzel", Georgia, serif; font-weight: 600; letter-spacing: .04em; }
