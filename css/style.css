@@ -61,6 +61,7 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
 .theme-row select { flex: 1; min-width: 0; background: #2a2c33; color: var(--text); border: 1px solid rgba(255,255,255,.25);
   border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; cursor: pointer; }
 .theme-row select:hover { border-color: var(--accent); }
+.ai-rows { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
 .theme-row input[type=checkbox] { accent-color: var(--accent); margin: 0; cursor: pointer; }
 
 /* Thèmes des deux camps : crochet et chaîne qui les lient (comme le verrou de proportions) */

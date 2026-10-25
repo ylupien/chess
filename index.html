@@ -98,6 +98,17 @@
         <button id="mode-rules" class="active">Partie</button>
         <button id="mode-free">Placement libre</button>
       </div>
+      <div class="ai-rows">
+        <label class="theme-row" title="Jouer contre l'ordinateur, ou à deux sur le même écran"><span>Adversaire</span>
+          <select id="ai-level"></select>
+        </label>
+        <label class="theme-row" id="ai-side-row"><span>Je joue</span>
+          <select id="ai-side">
+            <option value="w">les Blancs</option>
+            <option value="b">les Noirs</option>
+          </select>
+        </label>
+      </div>
       <div id="status"><span class="dot"></span><span id="status-text"></span></div>
       <p class="hint" id="hint"></p>
       <div class="row">
@@ -365,7 +376,7 @@
 
     // Les fichiers du jeu sont des scripts classiques (et non des modules) :
     // ainsi la page fonctionne aussi ouverte directement depuis le disque (file://).
-    const FILES = ['scene', 'antialias', 'boards', 'pieces', 'rules', 'notation', 'panels', 'sound', 'music', 'viewer', 'clock', 'endgame', 'online', 'main', 'debug'];
+    const FILES = ['scene', 'antialias', 'boards', 'pieces', 'rules', 'notation', 'panels', 'sound', 'music', 'viewer', 'clock', 'endgame', 'online', 'ai', 'main', 'debug'];
     for (const name of FILES) {
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');

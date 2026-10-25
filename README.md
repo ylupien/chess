@@ -162,6 +162,23 @@ La page est écrite en **Svelte 5** (`admin/src`) et compilée par **Vite** dans
 - **Partie** : seuls les coups légaux sont acceptés. Échec, échec et mat, pat, roque, prise en passant et promotion (choix de la pièce) sont gérés.
 - **Placement libre** : n'importe quelle pièce peut aller sur n'importe quelle case ; déposée sur une autre pièce, celle-ci sort du jeu. On peut retirer une pièce en la déposant hors du plateau, la reprendre depuis la réserve, vider le plateau ou changer le trait.
 
+### Jouer contre l'ordinateur
+
+Dans le panneau Contrôles, section Partie, la liste **Adversaire** propose *Humain (même écran)* ou l'ordinateur, en cinq niveaux ; **Je joue** choisit son camp (la caméra passe de ce côté, et l'ordinateur ouvre la partie si on prend les Noirs). Les choix sont mémorisés.
+
+| Niveau | Comportement |
+|---|---|
+| Débutant | regarde un coup à l'avance (prises comprises), avec beaucoup de hasard : il laisse souvent des pièces en prise |
+| Facile | deux demi-coups, encore un peu de hasard |
+| Moyen | cinq demi-coups, très peu de hasard |
+| Fort | environ 1 s de réflexion (8 à 9 demi-coups) |
+| Expert | environ 3,5 s de réflexion (10 demi-coups) |
+
+- **Annuler** revient au dernier coup du joueur (la réponse de l'ordinateur est annulée avec).
+- L'ordinateur ne joue qu'en mode Partie et hors des parties en ligne.
+- **Moteur** : `js/ai.js`, écrit pour le jeu, sans dépendance. Recherche alpha-bêta en approfondissement itératif avec table de transposition, recherche des prises jusqu'au calme, coup nul et réductions des coups tardifs ; évaluation du matériel et du placement (le roi se centralise en finale). Il évite de répéter une position quand il gagne.
+- **Fluidité** : il réfléchit dans un *Web Worker*, créé à partir de son propre code, ce qui marche aussi en `file://` : le rendu ne saccade pas.
+
 ### Interaction
 
 - Cliquez sur une pièce puis sur une case, ou glissez-déposez-la.
@@ -256,6 +273,7 @@ js/crystal.js     thème Cristal (pièces classiques en verre transparent)
 js/farm.js        thème La Ferme des animaux (les personnages d'Orwell)
 js/farm-models.js modèles détaillés de la Ferme (.glb en base64, généré par tools/modeles3d)
 js/rules.js       moteur de règles (indépendant de la 3D)
+js/ai.js          adversaire ordinateur (moteur d'échecs dans un Web Worker, 5 niveaux)
 js/notation.js    notation des coups et noms des pièces
 js/panels.js      panneaux déplaçables
 js/sound.js       sons du jeu (coups enregistrés + sons synthétisés)

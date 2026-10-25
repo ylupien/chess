@@ -28,6 +28,14 @@ let selected = null;
 let targets = [];                      // coups légaux de la pièce sélectionnée (mode partie)
 let hoverSq = -1;
 let classicHeld = false; // bouton « Classique » maintenu
+// Adversaire ordinateur : niveau 0 = deux joueurs sur le même écran ; aiSide = camp joué par l'ordinateur
+let aiLevel = 0, aiSide = 'b';
+try {
+  aiLevel = Math.max(0, Math.min(5, parseInt(localStorage.getItem('chess3d:ai-level'), 10) || 0));
+  aiSide = localStorage.getItem('chess3d:ai-side') === 'w' ? 'w' : 'b';
+} catch { }
+let aiKey = null; // position pour laquelle l'ordinateur réfléchit (null : il ne réfléchit pas)
+const aiActive = () => aiLevel > 0 && mode === 'rules' && !Online.active && !Online.watching;
 
 const whiteToMove = () => turn === 'w';
 const position = () => board.map(p => p ? { t: p.type, w: p.white, moved: p.moved } : null);
@@ -109,7 +117,8 @@ function resetGame({ fromOnline = false } = {}) {
   });
   turn = 'w'; epSquare = -1; lastMove = null; history = []; captureCounter = 0;
   moveNumber = 1; log = []; gameStartTime = 0;
-  setView(Online.active && !Online.isWhite ? 'black_fly' : 'white_fly'); // chacun revient à son côté
+  const blackView = Online.active ? !Online.isWhite : aiActive() && aiSide === 'w';
+  setView(blackView ? 'black_fly' : 'white_fly'); // chacun revient à son côté
 
   // Occupation réelle des cases pendant la remise en place : une pièce ne se pose sur sa case
   // que si elle est libre ; sinon, la pièce qui l'occupe doit d'abord partir vers la sienne.
@@ -555,6 +564,7 @@ function canPick(p) {
   if (Online.watching) return false; // spectateur : on regarde sans toucher
   if (mode === 'free') return true;
   if (Online.active && p.white !== Online.isWhite) return false; // en ligne : uniquement ses pièces
+  if (aiActive() && (p.white ? 'w' : 'b') === aiSide) return false; // les pièces de l'ordinateur
   return !gameOver && p.sq >= 0 && p.white === whiteToMove();
 }
 
@@ -863,6 +873,8 @@ function refresh() {
   btnTurn.classList.toggle('hidden', mode !== 'free');
   btnClear.classList.toggle('hidden', mode !== 'free');
   refreshHighlights();
+  aiLevelSel.disabled = aiSideSel.disabled = Online.active || Online.watching;
+  maybeAIMove();
 }
 
 // L'adversaire peut-il encore mater ? Non s'il n'a que son roi, ou roi + un fou ou un cavalier.
@@ -888,7 +900,72 @@ function setMode(m) {
 
 btnRules.onclick = () => setMode('rules');
 btnFree.onclick = () => setMode('free');
-btnUndo.onclick = () => { if (history.length && !busy && !Online.watching) { restore(history.pop()); Sound.play('undo'); } };
+btnUndo.onclick = () => {
+  if (!history.length || busy || Online.watching) return;
+  let s = history.pop();
+  // Contre l'ordinateur : on annule aussi sa réponse, pour revenir à un coup du joueur
+  while (aiActive() && s.turn === aiSide && history.length) s = history.pop();
+  restore(s);
+  Sound.play('undo');
+};
+
+// --- Adversaire ordinateur (js/ai.js) --------------------------------------------------
+const aiLevelSel = document.getElementById('ai-level'), aiSideSel = document.getElementById('ai-side');
+aiLevelSel.add(new Option('Humain (même écran)', '0'));
+const aiGroup = document.createElement('optgroup');
+aiGroup.label = 'Ordinateur';
+for (const l of AI.LEVELS) aiGroup.appendChild(new Option(`Ordinateur ${l.name.toLowerCase()}`, String(l.id)));
+aiLevelSel.appendChild(aiGroup);
+aiLevelSel.value = String(aiLevel);
+aiSideSel.value = aiSide === 'w' ? 'b' : 'w'; // le sélecteur indique le camp du joueur
+const showAISide = () => document.getElementById('ai-side-row').classList.toggle('hidden', !aiLevel);
+showAISide();
+aiLevelSel.onchange = () => {
+  aiLevel = +aiLevelSel.value;
+  try { localStorage.setItem('chess3d:ai-level', String(aiLevel)); } catch { }
+  showAISide();
+  clearSelection();
+  refresh(); // l'ordinateur joue tout de suite si c'est son tour
+};
+aiSideSel.onchange = () => {
+  aiSide = aiSideSel.value === 'w' ? 'b' : 'w';
+  try { localStorage.setItem('chess3d:ai-side', aiSide); } catch { }
+  setView(aiSide === 'w' ? 'black_fly' : 'white_fly'); // le joueur voit le plateau de son côté
+  clearSelection();
+  refresh();
+};
+
+// L'ordinateur réfléchit dans un worker quand c'est son tour ; son coup est joué comme un coup reçu
+// (sans dialogue de promotion). Un délai minimal laisse le temps de voir le coup précédent.
+const AI_MIN_DELAY = 650;
+function maybeAIMove() {
+  const key = `${resetGen}:${history.length}:${turn}:${aiLevel}:${aiSide}`;
+  if (!aiActive() || gameOver || resetting || turn !== aiSide) {
+    if (aiKey) { AI.cancel(); aiKey = null; }
+    return;
+  }
+  if (aiKey !== key) {
+    aiKey = key;
+    const t0 = performance.now();
+    // Positions déjà jouées : l'ordinateur évite de les répéter quand il gagne
+    const past = history.map(h => {
+      const pos = new Array(64).fill(null);
+      h.pieces.forEach((d, i) => { if (d.sq >= 0) pos[d.sq] = { t: d.type, w: pieces[i].white, moved: d.moved }; });
+      return { pos, white: h.turn === 'w', ep: h.epSquare };
+    });
+    AI.think({ pos: position(), white: turn === 'w', ep: epSquare, level: aiLevel, past }, res => {
+      setTimeout(() => {
+        if (aiKey !== key) return; // la partie a changé entre-temps (annulation, nouvelle partie…)
+        aiKey = null;
+        if (busy || resetting || !res.move) { refresh(); return; }
+        const m = legalMovesFrom(position(), res.from, epSquare).find(x => x.to === res.to);
+        if (m) playMove(m, { remote: true, promo: res.promo || 'q' });
+        else refresh();
+      }, Math.max(0, AI_MIN_DELAY - (performance.now() - t0)));
+    });
+  }
+  statusText.textContent += ' · l\'ordinateur réfléchit…';
+}
 document.getElementById('btn-reset').onclick = () => resetGame();
 document.getElementById('btn-online').onclick = () => Online.startHost(); // les pièces retournent à leur case en volant
 
