@@ -29,9 +29,11 @@ let targets = [];                      // coups légaux de la pièce sélectionn
 let hoverSq = -1;
 let classicHeld = false; // bouton « Classique » maintenu
 // Adversaire ordinateur : niveau 0 = deux joueurs sur le même écran ; aiSide = camp joué par l'ordinateur
-let aiLevel = 0, aiSide = 'b';
+// aiFast : adversaire « éclair », qui joue aussitôt (sinon, il prend le temps d'un humain)
+let aiLevel = 0, aiSide = 'b', aiFast = false;
 try {
   aiLevel = Math.max(0, Math.min(5, parseInt(localStorage.getItem('chess3d:ai-level'), 10) || 0));
+  aiFast = localStorage.getItem('chess3d:ai-fast') === '1';
   aiSide = localStorage.getItem('chess3d:ai-side') === 'w' ? 'w' : 'b';
 } catch { }
 let aiKey = null; // position pour laquelle l'ordinateur réfléchit (null : il ne réfléchit pas)
@@ -910,19 +912,23 @@ btnUndo.onclick = () => {
 };
 
 // --- Adversaire ordinateur (js/ai.js) --------------------------------------------------
+// Valeur du sélecteur : « 0 » (humain), « 3 » (ordinateur moyen, rythme humain), « 3e » (moyen éclair)
 const aiLevelSel = document.getElementById('ai-level'), aiSideSel = document.getElementById('ai-side');
 aiLevelSel.add(new Option('Humain (même écran)', '0'));
-const aiGroup = document.createElement('optgroup');
-aiGroup.label = 'Ordinateur';
-for (const l of AI.LEVELS) aiGroup.appendChild(new Option(`Ordinateur ${l.name.toLowerCase()}`, String(l.id)));
-aiLevelSel.appendChild(aiGroup);
-aiLevelSel.value = String(aiLevel);
+for (const [label, suffix, name] of [['Ordinateur', '', 'Ordinateur'], ['Ordinateur éclair (joue aussitôt)', 'e', 'Éclair']]) {
+  const group = document.createElement('optgroup');
+  group.label = label;
+  for (const l of AI.LEVELS) group.appendChild(new Option(`${name} ${l.name.toLowerCase()}`, l.id + suffix));
+  aiLevelSel.appendChild(group);
+}
+aiLevelSel.value = aiLevel ? aiLevel + (aiFast ? 'e' : '') : '0';
 aiSideSel.value = aiSide === 'w' ? 'b' : 'w'; // le sélecteur indique le camp du joueur
 const showAISide = () => document.getElementById('ai-side-row').classList.toggle('hidden', !aiLevel);
 showAISide();
 aiLevelSel.onchange = () => {
-  aiLevel = +aiLevelSel.value;
-  try { localStorage.setItem('chess3d:ai-level', String(aiLevel)); } catch { }
+  aiLevel = parseInt(aiLevelSel.value, 10) || 0;
+  aiFast = aiLevelSel.value.endsWith('e');
+  try { localStorage.setItem('chess3d:ai-level', String(aiLevel)); localStorage.setItem('chess3d:ai-fast', aiFast ? '1' : '0'); } catch { }
   showAISide();
   clearSelection();
   refresh(); // l'ordinateur joue tout de suite si c'est son tour
@@ -935,11 +941,39 @@ aiSideSel.onchange = () => {
   refresh();
 };
 
+// Temps qu'un joueur humain prendrait pour ce coup (ms), réflexion du moteur comprise :
+// vite pour un coup forcé, une reprise ou un coup d'ouverture, plus longtemps au milieu de partie,
+// et parfois une longue hésitation. Les niveaux forts réfléchissent un peu plus.
+const rand = (a, b) => a + Math.random() * (b - a);
+function humanDelay(res) {
+  const pos = position(), white = aiSide === 'w';
+  let legal = 0;
+  for (let s = 0; s < 64 && legal < 2; s++) if (pos[s] && pos[s].w === white) legal += legalMovesFrom(pos, s, epSquare).length;
+  const capture = !!board[res.to], recapture = capture && lastMove && lastMove.to === res.to;
+  const plies = log.filter(e => e.kind === 'move').length;
+  let d;
+  if (legal === 1) d = rand(700, 1300);                 // un seul coup possible
+  else if (recapture) d = rand(900, 2200);              // reprise évidente
+  else if (plies < 8) d = rand(1000, 2800);             // ouverture : coups connus
+  else if (inCheck(pos, white)) d = rand(1500, 4000);   // il faut parer l'échec
+  else {
+    d = rand(1800, 5200);
+    if (Math.random() < 0.15) d += rand(2500, 6000);    // de temps en temps, une longue réflexion
+  }
+  if (capture && !recapture) d *= 0.85;
+  if (Math.abs(res.score) > 90000) d *= 0.6;            // il voit le mat : il joue vite
+  d *= [1, 0.7, 0.8, 0.95, 1.1, 1.25][aiLevel];
+  // Pendule : jamais plus d'un vingtième du temps qui lui reste
+  const c = Clock.control;
+  if (c.base) d = Math.min(d, Clock.remaining[aiSide] / 20 + c.inc * 0.5);
+  return Math.max(500, d);
+}
+
 // L'ordinateur réfléchit dans un worker quand c'est son tour ; son coup est joué comme un coup reçu
-// (sans dialogue de promotion). Un délai minimal laisse le temps de voir le coup précédent.
-const AI_MIN_DELAY = 650;
+// (sans dialogue de promotion). Rythme humain : il attend, « prend » la pièce, puis la joue.
+const AI_FAST_DELAY = 350; // éclair : juste le temps de voir le coup précédent
 function maybeAIMove() {
-  const key = `${resetGen}:${history.length}:${turn}:${aiLevel}:${aiSide}`;
+  const key = `${resetGen}:${history.length}:${turn}:${aiLevel}:${aiFast}:${aiSide}`;
   if (!aiActive() || gameOver || resetting || turn !== aiSide) {
     if (aiKey) { AI.cancel(); aiKey = null; }
     return;
@@ -953,15 +987,27 @@ function maybeAIMove() {
       h.pieces.forEach((d, i) => { if (d.sq >= 0) pos[d.sq] = { t: d.type, w: pieces[i].white, moved: d.moved }; });
       return { pos, white: h.turn === 'w', ep: h.epSquare };
     });
+    const play = res => {
+      if (aiKey !== key) return; // la partie a changé entre-temps (annulation, nouvelle partie…)
+      aiKey = null;
+      if (busy || resetting || !res.move) { refresh(); return; }
+      const m = legalMovesFrom(position(), res.from, epSquare).find(x => x.to === res.to);
+      if (m) playMove(m, { remote: true, promo: res.promo || 'q' });
+      else refresh();
+    };
     AI.think({ pos: position(), white: turn === 'w', ep: epSquare, level: aiLevel, past }, res => {
+      if (aiKey !== key) return;
+      const wait = Math.max(0, (aiFast || !res.move ? AI_FAST_DELAY : humanDelay(res)) - (performance.now() - t0));
       setTimeout(() => {
-        if (aiKey !== key) return; // la partie a changé entre-temps (annulation, nouvelle partie…)
-        aiKey = null;
-        if (busy || resetting || !res.move) { refresh(); return; }
-        const m = legalMovesFrom(position(), res.from, epSquare).find(x => x.to === res.to);
-        if (m) playMove(m, { remote: true, promo: res.promo || 'q' });
-        else refresh();
-      }, Math.max(0, AI_MIN_DELAY - (performance.now() - t0)));
+        if (aiKey !== key) return;
+        const p = res.move && board[res.from];
+        if (aiFast || !p) { play(res); return; }
+        // La main se pose sur la pièce : petit sursaut et bruit de prise, puis le coup
+        varyJelly(p);
+        p.fx.sv += 1.2 * p.fx.v.squash;
+        Sound.play('pick');
+        setTimeout(() => play(res), rand(280, 520));
+      }, wait);
     });
   }
   statusText.textContent += ' · l\'ordinateur réfléchit…';

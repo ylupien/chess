@@ -164,7 +164,7 @@ La page est écrite en **Svelte 5** (`admin/src`) et compilée par **Vite** dans
 
 ### Jouer contre l'ordinateur
 
-Dans le panneau Contrôles, section Partie, la liste **Adversaire** propose *Humain (même écran)* ou l'ordinateur, en cinq niveaux ; **Je joue** choisit son camp (la caméra passe de ce côté, et l'ordinateur ouvre la partie si on prend les Noirs). Les choix sont mémorisés.
+Dans le panneau Contrôles, section Partie, la liste **Adversaire** propose *Humain (même écran)* ou l'ordinateur, en cinq niveaux et deux rythmes ; **Je joue** choisit son camp (la caméra passe de ce côté, et l'ordinateur ouvre la partie si on prend les Noirs). Les choix sont mémorisés.
 
 | Niveau | Comportement |
 |---|---|
@@ -174,6 +174,7 @@ Dans le panneau Contrôles, section Partie, la liste **Adversaire** propose *Hum
 | Fort | environ 1 s de réflexion (8 à 9 demi-coups) |
 | Expert | environ 3,5 s de réflexion (10 demi-coups) |
 
+- **Rythme** : l'*Ordinateur* joue comme un humain. Il réfléchit vite pour un coup forcé, une reprise ou un coup d'ouverture (1 à 3 s), plus longtemps au milieu de partie (2 à 5 s, parfois une longue hésitation), et plus vite s'il voit un mat. Les niveaux forts prennent un peu plus leur temps, et il ne dépense jamais plus d'un vingtième de son temps à la pendule. Avant de jouer, sa pièce frémit comme si une main la prenait. L'*Ordinateur éclair* joue aussitôt, aux mêmes cinq niveaux.
 - **Annuler** revient au dernier coup du joueur (la réponse de l'ordinateur est annulée avec).
 - L'ordinateur ne joue qu'en mode Partie et hors des parties en ligne.
 - **Moteur** : `js/ai.js`, écrit pour le jeu, sans dépendance. Recherche alpha-bêta en approfondissement itératif avec table de transposition, recherche des prises jusqu'au calme, coup nul et réductions des coups tardifs ; évaluation du matériel et du placement (le roi se centralise en finale). Il évite de répéter une position quand il gagne.
