@@ -1,11 +1,18 @@
 # Échiquier 3D
 
 Un jeu d'échecs en 3D dans le navigateur, construit avec [Three.js](https://threejs.org/).
-Les pièces et les plateaux sont entièrement générés par le code : aucune image ni aucun modèle 3D externe.
+Les plateaux et la plupart des thèmes de pièces sont entièrement générés par le code. Les personnages de *La Ferme des animaux* sont des modèles 3D détaillés, embarqués dans le jeu.
 
 > **Exemple d'instance en ligne : https://echecs.news-analytics.info**
 > Ouvrez l'adresse, cliquez **🌐 Jouer à deux en ligne**, puis envoyez l'URL d'invitation à votre adversaire.
 > ⚠️ Ce serveur tourne sur un ordinateur personnel, à la maison : il peut être hors ligne à tout moment. Pour jouer sans dépendre de lui, ouvrez simplement `index.html` (jeu solo) ou lancez votre propre serveur (voir plus bas).
+
+| | |
+|---|---|
+| ![La Ferme des animaux contre Médiéval](docs/captures/ferme-contre-medieval.jpg) | ![Les personnages de la Ferme : Minimus, Napoléon, Brille-Babil, Moïse et les poules](docs/captures/ferme-personnages.jpg) |
+| *La Ferme des animaux* contre *Médiéval* | Minimus, Napoléon, Brille-Babil, Moïse et les poules |
+| ![Thème Dragons](docs/captures/dragons.jpg) | ![Cristal contre Médiéval](docs/captures/cristal-contre-medieval.jpg) |
+| *Dragons* | *Cristal* contre *Médiéval* |
 
 ## Lancer le jeu
 
@@ -271,6 +278,7 @@ js/clock.js       pendule d'échecs (cadences, incrément, temps écoulé)
 js/main.js        état du jeu, animations, interactions, interface, journal
 tools/modeles3d/  fabrication des modèles détaillés (images IA, finition Blender, export)
 hyper3d/          zips téléchargés de Rodin (hors Git)
+docs/captures/    captures d'écran du README
 ```
 
 ### Pourquoi des scripts classiques et non des modules ES ?
