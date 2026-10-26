@@ -356,3 +356,4 @@ Il a été validé par des tests *perft* (comptage exhaustif des coups possibles
 - Musiques (CC0, OpenGameArt) : cynicmusic, Umplix, RandomMind, Yoiyami, Écrivain, Tarush Singhal, bobjt, Stereoscopic
 - Sons de pièces (CC0, Freesound) : JJTaynos
 - Moteur 3D : [Three.js](https://threejs.org/)
+- Modèles 3D de *La Ferme des animaux* : [Rodin (Hyper3D)](https://hyper3d.ai), finis avec [Blender](https://www.blender.org/)
